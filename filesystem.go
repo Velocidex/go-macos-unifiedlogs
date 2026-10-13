@@ -28,8 +28,13 @@ func NewLocalFile(path string) *LocalFile {
 }
 
 // Reader opens the source file and returns a reader for it.
-func (f *LocalFile) Reader() (io.ReadCloser, error) {
-	return os.Open(f.source)
+func (f *LocalFile) Reader() (*ReadCursor, error) {
+	res, err := os.Open(f.source)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewReadCursor(res), nil
 }
 
 // SourcePath returns the source path of the file.
@@ -112,7 +117,8 @@ func sortPaths(paths []string) []string {
 
 // walkMatching walks root and returns LocalFile sources for every file matching fileType,
 // sorted by path.
-func walkMatching(root string, fileType LogFileType) []SourceFile {
+func walkMatching(root string,
+	fileType LogFileType, logger *Logger) []SourceFile {
 	var paths []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -127,7 +133,7 @@ func walkMatching(root string, fileType LogFileType) []SourceFile {
 		return nil
 	})
 	if err != nil {
-		logger.Printf("[macos-unifiedlogs] Failed to walk %s: %v", root, err)
+		logger.Printf(" Failed to walk %s: %v", root, err)
 	}
 
 	sortPaths(paths)
@@ -145,10 +151,11 @@ func readSource(source SourceFile) ([]byte, error) {
 		return nil, err
 	}
 	defer reader.Close()
+
 	return io.ReadAll(reader)
 }
 
-func normalizeUUID(uuid string) (string, error) {
+func NormalizeUUID(uuid string) (string, error) {
 	const uuidLen = 32
 	switch len(uuid) {
 	case uuidLen - 1:
@@ -166,26 +173,32 @@ func normalizeUUID(uuid string) (string, error) {
 // paths on a live macOS system. These files are only present on macOS Sierra (10.12) and above.
 // The implemented methods emit error log messages if any are encountered while enumerating
 // files or creating readers, but are otherwise infallible.
-type LiveSystemProvider struct{}
+type LiveSystemProvider struct {
+	logger *Logger
+}
 
 // NewLiveSystemProvider returns a new LiveSystemProvider.
 func NewLiveSystemProvider() *LiveSystemProvider {
-	return &LiveSystemProvider{}
+	return &LiveSystemProvider{
+		logger: NewLogger(),
+	}
 }
 
 // Tracev3Files provides the .tracev3 files on a live system.
 func (p *LiveSystemProvider) Tracev3Files() []SourceFile {
-	return walkMatching("/private/var/db/diagnostics", LogFileTraceV3)
+	return walkMatching("/private/var/db/diagnostics",
+		LogFileTraceV3, p.logger)
 }
 
 // UUIDTextFiles provides the uuidtext string files on a live system.
 func (p *LiveSystemProvider) UUIDTextFiles() []SourceFile {
-	return walkMatching("/private/var/db/uuidtext", LogFileUUIDText)
+	return walkMatching("/private/var/db/uuidtext",
+		LogFileUUIDText, p.logger)
 }
 
 // ReadUUIDText reads a UUIDText file on a live system.
 func (p *LiveSystemProvider) ReadUUIDText(uuid string) (*UUIDText, error) {
-	normalized, err := normalizeUUID(uuid)
+	normalized, err := NormalizeUUID(uuid)
 	if err != nil {
 		return nil, err
 	}
@@ -199,9 +212,9 @@ func (p *LiveSystemProvider) ReadUUIDText(uuid string) (*UUIDText, error) {
 		return nil, err
 	}
 
-	results, err := parseUUIDText(buf)
+	results, err := ParseUUIDText(buf, p.logger)
 	if err != nil {
-		logger.Printf("[macos-unifiedlogs] Failed to parse UUID file %s: %v", path, err)
+		p.logger.Printf(" Failed to parse UUID file %s: %v", path, err)
 		return nil, fmt.Errorf("failed to read: %s", uuid)
 	}
 
@@ -210,20 +223,20 @@ func (p *LiveSystemProvider) ReadUUIDText(uuid string) (*UUIDText, error) {
 
 // ReadDSCUUID reads a shared string cache file on a live system.
 func (p *LiveSystemProvider) ReadDSCUUID(uuid string) (*SharedCacheStrings, error) {
-	normalized, err := normalizeUUID(uuid)
+	normalized, err := NormalizeUUID(uuid)
 	if err != nil {
 		return nil, err
 	}
 
 	path := filepath.Join("/private/var/db/uuidtext/dsc", normalized)
-	buf, err := os.ReadFile(path)
+	fd, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 
-	results, err := parseDSC(buf)
+	results, err := ParseDSC(NewReadCursor(fd), p.logger)
 	if err != nil {
-		logger.Printf("[macos-unifiedlogs] Failed to parse dsc UUID file %s: %v", path, err)
+		p.logger.Printf(" Failed to parse dsc UUID file %s: %v", path, err)
 		return nil, fmt.Errorf("failed to read: %s", uuid)
 	}
 
@@ -232,38 +245,48 @@ func (p *LiveSystemProvider) ReadDSCUUID(uuid string) (*SharedCacheStrings, erro
 
 // DSCFiles provides the shared string cache files on a live system.
 func (p *LiveSystemProvider) DSCFiles() []SourceFile {
-	return walkMatching("/private/var/db/uuidtext/dsc", LogFileDsc)
+	return walkMatching("/private/var/db/uuidtext/dsc",
+		LogFileDsc, p.logger)
 }
 
 // TimesyncFiles provides the .timesync files on a live system.
 func (p *LiveSystemProvider) TimesyncFiles() []SourceFile {
-	return walkMatching("/private/var/db/diagnostics/timesync", LogFileTimesync)
+	return walkMatching("/private/var/db/diagnostics/timesync",
+		LogFileTimesync, p.logger)
 }
 
 // LogarchiveProvider provides a FileProvider that enumerates the required files from a
 // provided logarchive.
 type LogarchiveProvider struct {
-	base string
+	base   string
+	logger *Logger
+}
+
+func (p *LiveSystemProvider) Logger() *Logger {
+	return p.logger
 }
 
 // NewLogarchiveProvider returns a new LogarchiveProvider rooted at path.
 func NewLogarchiveProvider(path string) *LogarchiveProvider {
-	return &LogarchiveProvider{base: path}
+	return &LogarchiveProvider{
+		base:   path,
+		logger: NewLogger(),
+	}
 }
 
 // Tracev3Files provides the .tracev3 files from the logarchive.
 func (p *LogarchiveProvider) Tracev3Files() []SourceFile {
-	return walkMatching(p.base, LogFileTraceV3)
+	return walkMatching(p.base, LogFileTraceV3, p.logger)
 }
 
 // UUIDTextFiles provides the uuidtext string files from the logarchive.
 func (p *LogarchiveProvider) UUIDTextFiles() []SourceFile {
-	return walkMatching(p.base, LogFileUUIDText)
+	return walkMatching(p.base, LogFileUUIDText, p.logger)
 }
 
 // ReadUUIDText reads a UUIDText file from the logarchive.
 func (p *LogarchiveProvider) ReadUUIDText(uuid string) (*UUIDText, error) {
-	normalized, err := normalizeUUID(uuid)
+	normalized, err := NormalizeUUID(uuid)
 	if err != nil {
 		return nil, err
 	}
@@ -277,9 +300,9 @@ func (p *LogarchiveProvider) ReadUUIDText(uuid string) (*UUIDText, error) {
 		return nil, err
 	}
 
-	results, err := parseUUIDText(buf)
+	results, err := ParseUUIDText(buf, p.logger)
 	if err != nil {
-		logger.Printf("[macos-unifiedlogs] Failed to parse UUID file %s: %v", path, err)
+		p.logger.Printf(" Failed to parse UUID file %s: %v", path, err)
 		return nil, fmt.Errorf("failed to read: %s", uuid)
 	}
 
@@ -288,20 +311,20 @@ func (p *LogarchiveProvider) ReadUUIDText(uuid string) (*UUIDText, error) {
 
 // ReadDSCUUID reads a shared string cache file from the logarchive.
 func (p *LogarchiveProvider) ReadDSCUUID(uuid string) (*SharedCacheStrings, error) {
-	normalized, err := normalizeUUID(uuid)
+	normalized, err := NormalizeUUID(uuid)
 	if err != nil {
 		return nil, err
 	}
 
 	path := filepath.Join(p.base, "dsc", normalized)
-	buf, err := os.ReadFile(path)
+	fd, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 
-	results, err := parseDSC(buf)
+	results, err := ParseDSC(NewReadCursor(fd), p.logger)
 	if err != nil {
-		logger.Printf("[macos-unifiedlogs] Failed to parse dsc UUID file %s: %v", path, err)
+		p.logger.Printf(" Failed to parse dsc UUID file %s: %v", path, err)
 		return nil, fmt.Errorf("failed to read: %s", uuid)
 	}
 
@@ -310,10 +333,14 @@ func (p *LogarchiveProvider) ReadDSCUUID(uuid string) (*SharedCacheStrings, erro
 
 // DSCFiles provides the shared string cache files from the logarchive.
 func (p *LogarchiveProvider) DSCFiles() []SourceFile {
-	return walkMatching(p.base, LogFileDsc)
+	return walkMatching(p.base, LogFileDsc, p.logger)
 }
 
 // TimesyncFiles provides the .timesync files from the logarchive.
 func (p *LogarchiveProvider) TimesyncFiles() []SourceFile {
-	return walkMatching(p.base, LogFileTimesync)
+	return walkMatching(p.base, LogFileTimesync, p.logger)
+}
+
+func (p *LogarchiveProvider) Logger() *Logger {
+	return p.logger
 }

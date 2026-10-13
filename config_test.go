@@ -404,7 +404,8 @@ var configTestNetworkInterface = []byte{
 }
 
 func TestGetDNSConfig(t *testing.T) {
-	_, result, err := getDNSConfig(configTestDNSConfig)
+	logger := NewLogger()
+	_, result, err := getDNSConfig(configTestDNSConfig, logger)
 	if err != nil {
 		t.Fatalf("getDNSConfig: %v", err)
 	}
@@ -417,7 +418,8 @@ func TestGetDNSConfig(t *testing.T) {
 }
 
 func TestParseNameserver(t *testing.T) {
-	_, result, err := parseNameserver(configTestNameserver)
+	logger := NewLogger()
+	_, result, err := parseNameserver(configTestNameserver, logger)
 	if err != nil {
 		t.Fatalf("parseNameserver: %v", err)
 	}
@@ -427,7 +429,8 @@ func TestParseNameserver(t *testing.T) {
 }
 
 func TestParseDNSResolver(t *testing.T) {
-	_, result, err := parseDNSResolver(configTestDNSResolver)
+	logger := NewLogger()
+	_, result, err := parseDNSResolver(configTestDNSResolver, logger)
 	if err != nil {
 		t.Fatalf("parseDNSResolver: %v", err)
 	}
@@ -443,8 +446,9 @@ func TestParseDNSResolver(t *testing.T) {
 }
 
 func TestParseDNSConfig(t *testing.T) {
+	logger := NewLogger()
 	count := uint32(8)
-	_, result, err := parseDNSConfig(configTestParseDNSConfig, count)
+	_, result, err := parseDNSConfig(configTestParseDNSConfig, count, logger)
 	if err != nil {
 		t.Fatalf("parseDNSConfig: %v", err)
 	}
@@ -454,7 +458,8 @@ func TestParseDNSConfig(t *testing.T) {
 }
 
 func TestGetNetworkInterface(t *testing.T) {
-	_, result, err := getNetworkInterface(configTestNetworkInterface)
+	logger := NewLogger()
+	_, result, err := getNetworkInterface(configTestNetworkInterface, logger)
 	if err != nil {
 		t.Fatalf("getNetworkInterface: %v", err)
 	}

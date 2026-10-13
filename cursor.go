@@ -8,9 +8,20 @@
 package unifiedlogs
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
+	"strings"
+	"sync"
+)
+
+const (
+	MAX_STRING_LEN  = 10 * 1024 * 1024
+	MEMORY_BUF_SIZE = 64 * 1024
+	BUF_SIZE        = 4096
 )
 
 // Sentinel errors mirroring the nom error kinds used by the original Rust crate.
@@ -194,4 +205,242 @@ func u128Hex(v [16]byte) string {
 		out[i*2+1] = hexDigits[b&0x0f]
 	}
 	return string(out)
+}
+
+type ReadCursor struct {
+	mu sync.Mutex
+	*bufio.Reader
+
+	fd     io.ReadSeekCloser
+	offset int64
+}
+
+func (self *ReadCursor) Read(buf []byte) (int, error) {
+	n, err := io.ReadFull(self.Reader, buf)
+	if err == io.ErrUnexpectedEOF {
+		if n > 0 {
+			err = nil
+		} else {
+			return 0, io.EOF
+		}
+	}
+
+	self.offset += int64(n)
+	if err == io.EOF {
+		UlogsBreak()
+	}
+
+	return n, err
+}
+
+func (self *ReadCursor) u32() (uint32, error) {
+	buf := []byte{0, 0, 0, 0}
+	n, err := self.Read(buf)
+	if n < 4 {
+		return 0, io.EOF
+	}
+	if err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint32(buf), nil
+}
+
+func (self *ReadCursor) u16() (uint16, error) {
+	buf := []byte{0, 0}
+	n, err := self.Read(buf)
+	if n < 2 {
+		return 0, io.EOF
+	}
+	if err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint16(buf), nil
+}
+
+func (self *ReadCursor) u64() (uint64, error) {
+	buf := []byte{0, 0, 0, 0, 0, 0, 0, 0}
+	n, err := self.Read(buf)
+	if n < 8 {
+		return 0, io.EOF
+	}
+	if err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint64(buf), nil
+}
+
+func (self *ReadCursor) u128be() ([16]byte, error) {
+	var out [16]byte
+	n, err := self.Read(out[:])
+	if n < 8 {
+		return out, io.EOF
+	}
+	if err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+func (self *ReadCursor) string(start, length uint64) (string, error) {
+	self.mu.Lock()
+	defer self.mu.Unlock()
+
+	_, err := self.fd.Seek(int64(start), io.SeekStart)
+	if err != nil {
+		return "", err
+	}
+
+	self.offset = int64(start)
+	self.Reader.Reset(self.fd)
+
+	// Read a buffer at the time until we hit a null termination.
+	buf := make([]byte, BUF_SIZE)
+	offset := start
+	end := start + length
+	res := strings.Builder{}
+
+	for {
+		to_read := int(end - offset)
+		if to_read > len(buf) {
+			to_read = len(buf)
+		}
+
+		// We are done!
+		if to_read == 0 {
+			return res.String(), nil
+		}
+
+		n, err := self.Read(buf[:to_read])
+		if err != nil && err != io.EOF {
+			return res.String(), err
+		}
+
+		// Search for null termination.
+		for i := 0; i < n; i++ {
+			if buf[i] == 0 {
+				res.Write(buf[:i])
+				return res.String(), nil
+			}
+		}
+
+		res.Write(buf[:n])
+
+		// A short read means the end of the file.
+		if n < to_read {
+			return res.String(), nil
+		}
+
+		offset += uint64(n)
+	}
+}
+
+func (self *ReadCursor) Tell() int64 {
+	return self.offset
+}
+
+func (self *ReadCursor) Pos(pos int64) error {
+	n, err := self.fd.Seek(pos, io.SeekStart)
+	self.offset = n
+	self.Reader.Reset(self.fd)
+	return err
+}
+
+func (self *ReadCursor) bytes(start, length int64) ([]byte, error) {
+	self.mu.Lock()
+	defer self.mu.Unlock()
+
+	if length > MAX_STRING_LEN {
+		length = MAX_STRING_LEN
+	}
+
+	_, err := self.fd.Seek(start, io.SeekStart)
+	if err != nil {
+		if err == io.EOF {
+			UlogsBreak()
+		}
+		return nil, err
+	}
+
+	self.offset = start
+	self.Reader.Reset(self.fd)
+
+	if length < 0 || length > MAX_STRING_LEN {
+		return nil, ErrTooLarge
+	}
+
+	res := make([]byte, length)
+	n, err := self.Read(res)
+	if err == io.EOF {
+		err = nil
+	}
+	return res[:n], err
+}
+
+func (self *ReadCursor) skip(n int) error {
+	_, err := self.take(n)
+	if err == io.EOF {
+		UlogsBreak()
+	}
+
+	return err
+}
+
+func (self *ReadCursor) take(n int) ([]byte, error) {
+	if n < 0 || n > MAX_STRING_LEN {
+		return nil, ErrTooLarge
+	}
+
+	buf := make([]byte, n)
+	n, err := self.Read(buf)
+	return buf[:n], err
+}
+
+// Swallow all bytes of delim until the reader is positioned at the
+// first non-delim char.
+func (self *ReadCursor) read_bytes(delim byte) error {
+	for {
+		buf, err := self.Reader.Peek(BUF_SIZE)
+		if err != nil && err != io.EOF {
+			return err
+		}
+		if err == io.EOF {
+			UlogsBreak()
+		}
+
+		for i := 0; i < len(buf); i++ {
+			if buf[i] != delim {
+				return self.skip(i)
+			}
+		}
+
+		if len(buf) == 0 {
+			return io.EOF
+		}
+
+		// The entire buf was delim, skip it all.
+		self.skip(len(buf))
+	}
+}
+
+func (self *ReadCursor) Close() {
+	self.fd.Close()
+}
+
+func NewReadCursor(reader io.ReadSeekCloser) *ReadCursor {
+	return &ReadCursor{
+		Reader: bufio.NewReaderSize(reader, MEMORY_BUF_SIZE),
+		fd:     reader,
+	}
+}
+
+type nopReadSeekCloser struct {
+	io.ReadSeeker
+}
+
+func (nopReadSeekCloser) Close() error {
+	return nil
+}
+
+func NewReadCursorFromBuffer(buf []byte) *ReadCursor {
+	return NewReadCursor(nopReadSeekCloser{bytes.NewReader(buf)})
 }

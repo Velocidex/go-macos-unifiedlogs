@@ -6,28 +6,3 @@
 // See the License for the specific language governing permissions and limitations under the License.
 
 package unifiedlogs
-
-import (
-	"bytes"
-	"io"
-	"strings"
-	"testing"
-)
-
-func TestSetLogOutput(t *testing.T) {
-	defer SetLogOutput(io.Discard)
-
-	var buf bytes.Buffer
-	SetLogOutput(&buf)
-	logger.Printf("[macos-unifiedlogs] test %d", 42)
-	if !strings.Contains(buf.String(), "[macos-unifiedlogs] test 42") {
-		t.Fatalf("SetLogOutput did not capture output: %q", buf.String())
-	}
-
-	SetLogOutput(io.Discard)
-	buf.Reset()
-	logger.Printf("[macos-unifiedlogs] silent")
-	if buf.Len() != 0 {
-		t.Fatalf("expected no output when discarded, got %q", buf.String())
-	}
-}

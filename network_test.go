@@ -65,7 +65,8 @@ func TestGetIPFour(t *testing.T) {
 
 func TestSockaddr(t *testing.T) {
 	testData := "EAIAALgciWcAAAAAAAAAAA=="
-	result, err := sockaddr(testData)
+	logger := NewLogger()
+	result, err := sockaddr(testData, logger)
 	if err != nil {
 		t.Fatalf("sockaddr returned error: %v", err)
 	}
@@ -74,7 +75,7 @@ func TestSockaddr(t *testing.T) {
 	}
 
 	testData = "HB4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
-	result, err = sockaddr(testData)
+	result, err = sockaddr(testData, logger)
 	if err != nil {
 		t.Fatalf("sockaddr returned error: %v", err)
 	}
@@ -89,8 +90,8 @@ func TestGetSockaddrData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeStandard returned error: %v", err)
 	}
-
-	_, result, err := getSockaddrData(decodedData)
+	logger := NewLogger()
+	_, result, err := getSockaddrData(decodedData, logger)
 	if err != nil {
 		t.Fatalf("getSockaddrData returned error: %v", err)
 	}

@@ -32,8 +32,9 @@ func TestParseSimpledump(t *testing.T) {
 		112, 114, 101, 115, 115, 117, 114, 101, 100, 45, 101, 120,
 		105, 116, 32, 61, 32, 49, 0, 0, 0, 0, 0, 0,
 	}
-
-	_, results, err := parseSimpledump(testData)
+	logger := NewLogger()
+	results, err := parseSimpledump(
+		testData, &LogPreamble{ChunkTag: simpledumpChunk}, logger)
 	if err != nil {
 		t.Fatalf("parseSimpledump returned error: %v", err)
 	}

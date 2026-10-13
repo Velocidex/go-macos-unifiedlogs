@@ -10,10 +10,10 @@ package unifiedlogs
 import "testing"
 
 func TestUnifiedLogIterator(t *testing.T) {
-	buffer := requireTestData(t, "system_logs_big_sur.logarchive/Persist/0000000000000002.tracev3")
+	c := requireTestReadCursor(t, "system_logs_big_sur.logarchive/Persist/0000000000000002.tracev3")
 
 	it := UnifiedLogIterator{
-		Data:     buffer,
+		Reader:   c,
 		Header:   nil,
 		Evidence: "0000000000000002.tracev3",
 	}
@@ -59,14 +59,17 @@ func TestUnifiedLogIteratorBuildLog(t *testing.T) {
 		t.Fatalf("CollectTimesync failed: %v", err)
 	}
 
-	buffer := requireTestData(t, "system_logs_big_sur.logarchive/Persist/0000000000000002.tracev3")
+	c := requireTestReadCursor(t, "system_logs_big_sur.logarchive/Persist/0000000000000002.tracev3")
 	it := UnifiedLogIterator{
-		Data:     buffer,
+		Reader:   c,
 		Header:   nil,
 		Evidence: "0000000000000002.tracev3",
 	}
 
 	cache := NewMemoryStringCache()
+
+	logger := NewLogger()
+	parser := NewUnifiedLogParser(provider, logger, cache)
 
 	total := 0
 	for {
@@ -76,7 +79,7 @@ func TestUnifiedLogIteratorBuildLog(t *testing.T) {
 		}
 
 		excludeMissing := false
-		results, _ := BuildLog(chunk, provider, cache, timesyncData, excludeMissing)
+		results, _ := parser.BuildLog(chunk, timesyncData, excludeMissing)
 
 		if len(results) > 10 && results[10].Time == 1642302327364384800.0 {
 			if len(results) != 3805 {
@@ -145,11 +148,9 @@ func TestUnifiedLogIteratorBuildLog(t *testing.T) {
 
 func TestNomBytes(t *testing.T) {
 	test := []byte{1, 0, 0, 0}
-	left, _, err := nomBytes(test, 1)
+	c := NewReadCursorFromBuffer(test)
+	_, err := nomBytes(c, 1)
 	if err != nil {
 		t.Fatalf("nomBytes failed: %v", err)
-	}
-	if len(left) != 3 {
-		t.Errorf("left len = %d, want 3", len(left))
 	}
 }

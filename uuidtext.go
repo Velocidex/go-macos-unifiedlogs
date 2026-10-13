@@ -28,9 +28,9 @@ type UUIDTextEntry struct {
 	EntrySize        uint32 `json:"entry_size"`
 }
 
-// parseUUIDText parses the UUID files in the uuidinfo directory.
+// ParseUUIDText parses the UUID files in the uuidinfo directory.
 // Contains the base log message string.
-func parseUUIDText(data []byte) (*UUIDText, error) {
+func ParseUUIDText(data []byte, logger *Logger) (*UUIDText, error) {
 	uuidtextData := &UUIDText{}
 
 	const expectedUUIDTextSignature uint32 = 0x66778899
@@ -41,7 +41,7 @@ func parseUUIDText(data []byte) (*UUIDText, error) {
 	}
 
 	if expectedUUIDTextSignature != uuidtextSignature {
-		logger.Printf("[macos-unifiedlogs] Incorrect UUIDText header signature. Expected %d. Got: %d",
+		logger.Printf("Incorrect UUIDText header signature. Expected %d. Got: %d",
 			expectedUUIDTextSignature, uuidtextSignature)
 		return nil, fmt.Errorf("incorrect UUIDText header signature: %w", ErrIncomplete)
 	}

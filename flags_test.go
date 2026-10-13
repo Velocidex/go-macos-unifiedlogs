@@ -19,7 +19,8 @@ func TestFirehoseFormatterFlagsHasLargeOffset(t *testing.T) {
 	testFlags := uint16(557)
 
 	var flags []MessageFlags
-	_, results, err := FirehoseFormatterFlags(testData, testFlags, &flags)
+	logger := NewLogger()
+	_, results, err := FirehoseFormatterFlags(testData, testFlags, &flags, logger)
 	if err != nil {
 		t.Fatalf("FirehoseFormatterFlags returned error: %v", err)
 	}
@@ -40,7 +41,8 @@ func TestFirehoseFormatterFlagsMessageStringsUUIDMessageAltIndex(t *testing.T) {
 	testFlags := uint16(8)
 
 	var flags []MessageFlags
-	_, results, err := FirehoseFormatterFlags(testData, testFlags, &flags)
+	logger := NewLogger()
+	_, results, err := FirehoseFormatterFlags(testData, testFlags, &flags, logger)
 	if err != nil {
 		t.Fatalf("FirehoseFormatterFlags returned error: %v", err)
 	}
@@ -58,7 +60,8 @@ func TestFirehoseFormatterFlagsMessageStringsUUID(t *testing.T) {
 	testFlags := uint16(514)
 
 	var flags []MessageFlags
-	_, results, err := FirehoseFormatterFlags(testData, testFlags, &flags)
+	logger := NewLogger()
+	_, results, err := FirehoseFormatterFlags(testData, testFlags, &flags, logger)
 	if err != nil {
 		t.Fatalf("FirehoseFormatterFlags returned error: %v", err)
 	}
@@ -80,7 +83,8 @@ func TestFirehoseFormatterFlagsSharedCacheDSCUUID(t *testing.T) {
 	testFlags := uint16(516)
 
 	var flags []MessageFlags
-	_, results, err := FirehoseFormatterFlags(testData, testFlags, &flags)
+	logger := NewLogger()
+	_, results, err := FirehoseFormatterFlags(testData, testFlags, &flags, logger)
 	if err != nil {
 		t.Fatalf("FirehoseFormatterFlags returned error: %v", err)
 	}
@@ -105,7 +109,8 @@ func TestFirehoseFormatterFlagsAbsoluteMessageAltUUID(t *testing.T) {
 	testFlags := uint16(8)
 
 	var flags []MessageFlags
-	_, results, err := FirehoseFormatterFlags(testData, testFlags, &flags)
+	logger := NewLogger()
+	_, results, err := FirehoseFormatterFlags(testData, testFlags, &flags, logger)
 	if err != nil {
 		t.Fatalf("FirehoseFormatterFlags returned error: %v", err)
 	}
@@ -128,7 +133,8 @@ func TestFirehoseFormatterFlagsUUIDRelative(t *testing.T) {
 	testFlags := uint16(0xa)
 
 	var flags []MessageFlags
-	_, results, err := FirehoseFormatterFlags(testData, testFlags, &flags)
+	logger := NewLogger()
+	_, results, err := FirehoseFormatterFlags(testData, testFlags, &flags, logger)
 	if err != nil {
 		t.Fatalf("FirehoseFormatterFlags returned error: %v", err)
 	}

@@ -44,21 +44,11 @@ type HeaderChunk struct {
 }
 
 // parseHeader parses the Unified Log tracev3 header data.
-func parseHeader(c *cursor) (*HeaderChunk, error) {
+func parseHeader(c *ReadCursor,
+	preamble *LogPreamble,
+	logger *Logger) (*HeaderChunk, error) {
 	headerChunk := &HeaderChunk{}
 
-	chunkTag, err := c.u32()
-	if err != nil {
-		return nil, err
-	}
-	chunkSubTag, err := c.u32()
-	if err != nil {
-		return nil, err
-	}
-	chunkDataSize, err := c.u64()
-	if err != nil {
-		return nil, err
-	}
 	machTimeNumerator, err := c.u32()
 	if err != nil {
 		return nil, err
@@ -164,9 +154,9 @@ func parseHeader(c *cursor) (*HeaderChunk, error) {
 		return nil, err
 	}
 
-	headerChunk.ChunkTag = chunkTag
-	headerChunk.ChunkSubTag = chunkSubTag
-	headerChunk.ChunkDataSize = chunkDataSize
+	headerChunk.ChunkTag = preamble.ChunkTag
+	headerChunk.ChunkSubTag = preamble.ChunkSubTag
+	headerChunk.ChunkDataSize = preamble.ChunkDataSize
 	headerChunk.MachTimeNumerator = machTimeNumerator
 	headerChunk.MachTimeDenominator = machTimeDenominator
 	headerChunk.ContinousTime = continousTime
@@ -193,19 +183,19 @@ func parseHeader(c *cursor) (*HeaderChunk, error) {
 	if utf8.Valid(timezonePath) {
 		headerChunk.TimezonePath = trimTrailingNulls(string(timezonePath))
 	} else {
-		logger.Printf("[macos-unifiedlogs] Failed to get timezone path from header: invalid UTF-8")
+		logger.Printf(" Failed to get timezone path from header: invalid UTF-8")
 	}
 
 	if utf8.Valid(buildVersionBytes) {
 		headerChunk.BuildVersionString = trimTrailingNulls(string(buildVersionBytes))
 	} else {
-		logger.Printf("[macos-unifiedlogs] Failed to get build version from header: invalid UTF-8")
+		logger.Printf(" Failed to get build version from header: invalid UTF-8")
 	}
 
 	if utf8.Valid(hardwareModelBytes) {
 		headerChunk.HardwareModelString = trimTrailingNulls(string(hardwareModelBytes))
 	} else {
-		logger.Printf("[macos-unifiedlogs] Failed to get hardware info from header: invalid UTF-8")
+		logger.Printf(" Failed to get hardware info from header: invalid UTF-8")
 	}
 
 	return headerChunk, nil

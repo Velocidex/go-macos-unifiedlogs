@@ -26,38 +26,29 @@ type Oversize struct {
 
 // parseOversize parses the oversize log entry.
 // Ex: tp 2368 + 200: oversize log entry
-func parseOversize(data []byte) ([]byte, Oversize, error) {
+func parseOversize(
+	data []byte,
+	preamble *LogPreamble,
+	logger *Logger) (Oversize, error) {
 	var oversizeResults Oversize
 	c := newCursor(data)
 
-	oversizeChunkTag, err := c.u32()
-	if err != nil {
-		return nil, oversizeResults, err
-	}
-	oversizeChunkSubtag, err := c.u32()
-	if err != nil {
-		return nil, oversizeResults, err
-	}
-	oversizeChunkDataSize, err := c.u64()
-	if err != nil {
-		return nil, oversizeResults, err
-	}
 	oversizeFirstProcID, err := c.u64()
 	if err != nil {
-		return nil, oversizeResults, err
+		return oversizeResults, err
 	}
 	oversizeSecondProcID, err := c.u32()
 	if err != nil {
-		return nil, oversizeResults, err
+		return oversizeResults, err
 	}
 	oversizeTTL, err := c.u8()
 	if err != nil {
-		return nil, oversizeResults, err
+		return oversizeResults, err
 	}
 
-	oversizeResults.ChunkTag = oversizeChunkTag
-	oversizeResults.ChunkSubtag = oversizeChunkSubtag
-	oversizeResults.ChunkDataSize = oversizeChunkDataSize
+	oversizeResults.ChunkTag = preamble.ChunkTag
+	oversizeResults.ChunkSubtag = preamble.ChunkSubTag
+	oversizeResults.ChunkDataSize = preamble.ChunkDataSize
 	oversizeResults.FirstProcID = oversizeFirstProcID
 	oversizeResults.SecondProcID = oversizeSecondProcID
 	oversizeResults.TTL = oversizeTTL
@@ -65,25 +56,25 @@ func parseOversize(data []byte) ([]byte, Oversize, error) {
 	const reservedSize uint8 = 3
 	reserved, err := c.take(int(reservedSize))
 	if err != nil {
-		return nil, oversizeResults, err
+		return oversizeResults, err
 	}
 	oversizeResults.Reserved = reserved
 
 	oversizeContinousTime, err := c.u64()
 	if err != nil {
-		return nil, oversizeResults, err
+		return oversizeResults, err
 	}
 	oversizeDataRefIndex, err := c.u32()
 	if err != nil {
-		return nil, oversizeResults, err
+		return oversizeResults, err
 	}
 	oversizePublicDataSize, err := c.u16()
 	if err != nil {
-		return nil, oversizeResults, err
+		return oversizeResults, err
 	}
 	oversizePrivateDataSize, err := c.u16()
 	if err != nil {
-		return nil, oversizeResults, err
+		return oversizeResults, err
 	}
 
 	oversizeResults.ContinuousTime = oversizeContinousTime
@@ -95,42 +86,48 @@ func parseOversize(data []byte) ([]byte, Oversize, error) {
 
 	// Contains item data like firehose (ex: 0x42)
 	if oversizeDataSize > len(c.rest()) {
-		logger.Printf("[macos-unifiedlogs] Oversize data size greater than Oversize remaining string size. Using remaining string size")
+		logger.Printf("Oversize data size greater than Oversize remaining string size. Using remaining string size")
 		oversizeDataSize = len(c.rest())
 	}
 	pubData, err := c.take(oversizeDataSize)
 	if err != nil {
-		return nil, oversizeResults, err
+		return oversizeResults, err
 	}
 
 	messageData := pubData
 
 	var oversizeItemCount uint8
 	if len(messageData) < 2 {
-		return nil, oversizeResults, ErrIncomplete
+		return oversizeResults, ErrIncomplete
 	}
 	oversizeItemCount = messageData[1] // first byte is the unused item type
 	messageData = messageData[2:]
 
 	const emptyFlags uint16 = 0
 	// Grab all message items from oversize data
-	oversizePrivateData, firehoseItemData, err := collectFirehoseItems(messageData, oversizeItemCount, emptyFlags)
+	oversizePrivateData, firehoseItemData, err := collectFirehoseItems(messageData, oversizeItemCount, emptyFlags, logger)
 	if err != nil {
-		return nil, oversizeResults, err
+		return oversizeResults, err
 	}
-	_, err = parsePrivateFirehoseData(oversizePrivateData, &firehoseItemData)
+	_, err = parsePrivateFirehoseData(
+		oversizePrivateData, &firehoseItemData, logger)
 	if err != nil {
-		return nil, oversizeResults, err
+		return oversizeResults, err
 	}
 
 	oversizeResults.MessageItems = firehoseItemData
 
-	return c.rest(), oversizeResults, nil
+	return oversizeResults, nil
 }
 
 // getOversizeStrings gets the firehose item info from the oversize log entry
 // based on oversize (data ref) id, first proc id, and second proc id.
-func getOversizeStrings(dataRef uint32, firstProcID uint64, secondProcID uint32, oversizeData []Oversize) []FirehoseItemType {
+func getOversizeStrings(
+	dataRef uint32,
+	firstProcID uint64,
+	secondProcID uint32,
+	oversizeData []Oversize,
+	logger *Logger) []FirehoseItemType {
 	var itemInfo []FirehoseItemType
 	for _, oversize := range oversizeData {
 		if dataRef == oversize.DataRefIndex &&
@@ -140,6 +137,6 @@ func getOversizeStrings(dataRef uint32, firstProcID uint64, secondProcID uint32,
 		}
 	}
 	// We may not find any oversize data (data may have rolled from logs?)
-	logger.Printf("[macos-unifiedlogs] Did not find any oversize log entries from Data Ref ID: %d, First Proc ID: %d, and Second Proc ID: %d", dataRef, firstProcID, secondProcID)
+	logger.Printf("Did not find any oversize log entries from Data Ref ID: %d, First Proc ID: %d, and Second Proc ID: %d", dataRef, firstProcID, secondProcID)
 	return itemInfo
 }

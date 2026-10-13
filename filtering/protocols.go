@@ -1,7 +1,7 @@
 package filtering
 
 import (
-	unifiedlogs "github.com/predictiple/go-macos-unifiedlogs"
+	unifiedlogs "github.com/Velocidex/go-macos-unifiedlogs"
 	"www.velocidex.com/golang/vfilter/types"
 )
 
@@ -113,9 +113,9 @@ func (self LogDataAssociative) Associative(
 	case "Category", "category":
 		return log.Category, true
 	case "EventType", "event_type":
-		return log.EventType, true
+		return string(log.EventType), true
 	case "LogType", "log_type":
-		return log.EventType, true
+		return string(log.EventType), true
 	case "Process", "process":
 		return log.Process, true
 	case "ProcessUUID", "process_uuid":

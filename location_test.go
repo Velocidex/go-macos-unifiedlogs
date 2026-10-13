@@ -44,7 +44,8 @@ func TestSubharvesterIdentifier(t *testing.T) {
 
 func TestSqlite(t *testing.T) {
 	testData := "AAAAAA=="
-	result, err := sqliteLocation(testData)
+	logger := NewLogger()
+	result, err := sqliteLocation(testData, logger)
 	if err != nil {
 		t.Fatalf("sqliteLocation returned error: %v", err)
 	}
@@ -59,8 +60,8 @@ func TestGetSqliteData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeStandard returned error: %v", err)
 	}
-
-	_, result, err := getSqliteData(decodedData)
+	logger := NewLogger()
+	_, result, err := getSqliteData(decodedData, logger)
 	if err != nil {
 		t.Fatalf("getSqliteData returned error: %v", err)
 	}
@@ -154,7 +155,8 @@ func TestGetDaemonStatusTracker(t *testing.T) {
 		0, 0, 0, 0, 0, 0, 240, 191, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0,
 		255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0,
 	}
-	_, result, err := getDaemonStatusTracker(testData)
+	logger := NewLogger()
+	_, result, err := getDaemonStatusTracker(testData, logger)
 	if err != nil {
 		t.Fatalf("getDaemonStatusTracker returned error: %v", err)
 	}
@@ -168,7 +170,8 @@ func TestGetDaemonStatusTrackerWasConnectedTrue(t *testing.T) {
 	testData := []byte{
 		0, 0, 0, 0, 0, 0, 89, 64, 0, 1, 19, 4, 2, 0, 0, 0, 1, 192, 243, 246, 5, 64, 0, 224, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	}
-	_, result, err := getDaemonStatusTracker(testData)
+	logger := NewLogger()
+	_, result, err := getDaemonStatusTracker(testData, logger)
 	if err != nil {
 		t.Fatalf("getDaemonStatusTracker returned error: %v", err)
 	}

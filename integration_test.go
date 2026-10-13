@@ -8,7 +8,6 @@
 package unifiedlogs
 
 import (
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -39,15 +38,13 @@ func logarchiveProvider(t *testing.T, name, probe string) *LogarchiveProvider {
 // parseTracev3 parses a single .tracev3 file within the named logarchive.
 func parseTracev3(t *testing.T, archive, rel string) *UnifiedLogData {
 	t.Helper()
-	path := requireTestDataFile(t, archive+"/"+rel)
-	f, err := os.Open(path)
-	if err != nil {
-		t.Fatalf("open %s: %v", path, err)
-	}
+	filename := archive + "/" + rel
+	f := requireTestReadCursor(t, filename)
 	defer f.Close()
-	logData, err := ParseLog(f, path)
+	logger := NewLogger()
+	logData, err := ParseLog(f, filename, logger)
 	if err != nil {
-		t.Fatalf("ParseLog(%s): %v", path, err)
+		t.Fatalf("ParseLog(%s): %v", filename, err)
 	}
 	return logData
 }
@@ -59,9 +56,11 @@ func collectLogs(t *testing.T, provider FileProvider) []*UnifiedLogData {
 	for _, entry := range provider.Tracev3Files() {
 		r, err := entry.Reader()
 		if err != nil {
-			t.Fatalf("reader %s: %v", entry.SourcePath(), err)
+			t.Fatalf("ParseLog(%s): %v", entry.SourcePath(), err)
 		}
-		logData, err := ParseLog(r, entry.SourcePath())
+
+		logger := NewLogger()
+		logData, err := ParseLog(r, entry.SourcePath(), logger)
 		r.Close()
 		if err != nil {
 			t.Fatalf("ParseLog(%s): %v", entry.SourcePath(), err)
@@ -114,8 +113,11 @@ func TestBigSurLivedataIntegration(t *testing.T) {
 		t.Fatalf("CollectTimesync: %v", err)
 	}
 
+	logger := NewLogger()
+	parser := NewUnifiedLogParser(provider, logger, cache)
+
 	logData := parseTracev3(t, bigSurArchive, "logdata.LiveData.tracev3")
-	results, _ := BuildLog(logData, provider, cache, timesyncData, false)
+	results, _ := parser.BuildLog(logData, timesyncData, false)
 	if got := len(results); got != 101566 {
 		t.Fatalf("results len = %d, want 101566", got)
 	}
@@ -180,7 +182,10 @@ func TestBuildLogBigSurIntegration(t *testing.T) {
 	}
 
 	logData := parseTracev3(t, bigSurArchive, "Persist/0000000000000004.tracev3")
-	results, _ := BuildLog(logData, provider, cache, timesyncData, false)
+	logger := NewLogger()
+	parser := NewUnifiedLogParser(provider, logger, cache)
+
+	results, _ := parser.BuildLog(logData, timesyncData, false)
 	if len(results) != 110953 {
 		t.Fatalf("results len = %d, want 110953", len(results))
 	}
@@ -249,8 +254,11 @@ func TestParseAllLogsBigSurIntegration(t *testing.T) {
 	logData := collectLogs(t, provider)
 
 	var logDataVec []LogData
+	logger := NewLogger()
+	parser := NewUnifiedLogParser(provider, logger, cache)
+
 	for _, logs := range logData {
-		data, _ := BuildLog(logs, provider, cache, timesyncData, false)
+		data, _ := parser.BuildLog(logs, timesyncData, false)
 		logDataVec = append(logDataVec, data...)
 	}
 	if len(logDataVec) != 747616 {
@@ -420,8 +428,11 @@ func TestParseAllPersistLogsWithNetworkBigSurIntegration(t *testing.T) {
 	logData := collectLogs(t, provider)
 
 	var logDataVec []LogData
+	logger := NewLogger()
+	parser := NewUnifiedLogParser(provider, logger, cache)
+
 	for _, logs := range logData {
-		data, _ := BuildLog(logs, provider, cache, timesyncData, false)
+		data, _ := parser.BuildLog(logs, timesyncData, false)
 		logDataVec = append(logDataVec, data...)
 	}
 
@@ -497,8 +508,11 @@ func TestParseAllLogsPrivateBigSurIntegration(t *testing.T) {
 	logData := collectLogs(t, provider)
 
 	var logDataVec []LogData
+	logger := NewLogger()
+	parser := NewUnifiedLogParser(provider, logger, cache)
+
 	for _, logs := range logData {
-		data, _ := BuildLog(logs, provider, cache, timesyncData, false)
+		data, _ := parser.BuildLog(logs, timesyncData, false)
 		logDataVec = append(logDataVec, data...)
 	}
 	if len(logDataVec) != 887890 {
@@ -538,8 +552,11 @@ func TestParseAllLogsPrivateWithPublicMixBigSurIntegration(t *testing.T) {
 	logData := collectLogs(t, provider)
 
 	var logDataVec []LogData
+	logger := NewLogger()
+	parser := NewUnifiedLogParser(provider, logger, cache)
+
 	for _, logs := range logData {
-		data, _ := BuildLog(logs, provider, cache, timesyncData, false)
+		data, _ := parser.BuildLog(logs, timesyncData, false)
 		logDataVec = append(logDataVec, data...)
 	}
 	if len(logDataVec) != 1287628 {
@@ -594,9 +611,11 @@ func TestParseAllLogsPrivateWithPublicMixBigSurSingleFileIntegration(t *testing.
 	if err != nil {
 		t.Fatalf("CollectTimesync: %v", err)
 	}
+	logger := NewLogger()
+	parser := NewUnifiedLogParser(provider, logger, cache)
 
 	logData := parseTracev3(t, bigSurMixArchive, "Persist/0000000000000009.tracev3")
-	results, _ := BuildLog(logData, provider, cache, timesyncData, false)
+	results, _ := parser.BuildLog(logData, timesyncData, false)
 	if len(results) != 91567 {
 		t.Fatalf("results len = %d, want 91567", len(results))
 	}
@@ -632,9 +651,11 @@ func TestParseAllLogsPrivateWithPublicMixBigSurSpecialFileIntegration(t *testing
 	if err != nil {
 		t.Fatalf("CollectTimesync: %v", err)
 	}
+	logger := NewLogger()
+	parser := NewUnifiedLogParser(provider, logger, cache)
 
 	logData := parseTracev3(t, bigSurMixArchive, "Special/0000000000000008.tracev3")
-	results, _ := BuildLog(logData, provider, cache, timesyncData, false)
+	results, _ := parser.BuildLog(logData, timesyncData, false)
 	if len(results) != 2238 {
 		t.Fatalf("results len = %d, want 2238", len(results))
 	}
@@ -677,9 +698,11 @@ func TestBigSurMissingOversizeStringsIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CollectTimesync: %v", err)
 	}
+	logger := NewLogger()
+	parser := NewUnifiedLogParser(provider, logger, cache)
 
 	logData := parseTracev3(t, bigSurArchive, "logdata.LiveData.tracev3")
-	data, _ := BuildLog(logData, provider, cache, timesyncData, false)
+	data, _ := parser.BuildLog(logData, timesyncData, false)
 	if len(data) != 101566 {
 		t.Fatalf("data len = %d, want 101566", len(data))
 	}
@@ -709,8 +732,10 @@ func TestBigSurOversizeStringsInAnotherFileIntegration(t *testing.T) {
 
 	results.Oversize = append(results.Oversize, logData.Oversize...)
 	results.Oversize = append(results.Oversize, specialData.Oversize...)
+	logger := NewLogger()
+	parser := NewUnifiedLogParser(provider, logger, cache)
 
-	data, _ := BuildLog(results, provider, cache, timesyncData, false)
+	data, _ := parser.BuildLog(results, timesyncData, false)
 	if len(data) != 101566 {
 		t.Fatalf("data len = %d, want 101566", len(data))
 	}
@@ -760,9 +785,11 @@ func TestBuildLogHighSierraIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CollectTimesync: %v", err)
 	}
+	logger := NewLogger()
+	parser := NewUnifiedLogParser(provider, logger, cache)
 
 	logData := parseTracev3(t, highSierraArchive, "Persist/0000000000000001.tracev3")
-	results, _ := BuildLog(logData, provider, cache, timesyncData, false)
+	results, _ := parser.BuildLog(logData, timesyncData, false)
 	if len(results) != 162402 {
 		t.Fatalf("results len = %d, want 162402", len(results))
 	}
@@ -828,9 +855,11 @@ func TestBuildLogComplexFormatHighSierraIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CollectTimesync: %v", err)
 	}
+	logger := NewLogger()
+	parser := NewUnifiedLogParser(provider, logger, cache)
 
 	logData := parseTracev3(t, highSierraArchive, "Persist/0000000000000001.tracev3")
-	results, _ := BuildLog(logData, provider, cache, timesyncData, false)
+	results, _ := parser.BuildLog(logData, timesyncData, false)
 	if len(results) != 162402 {
 		t.Fatalf("results len = %d, want 162402", len(results))
 	}
@@ -899,9 +928,11 @@ func TestBuildLogNegativeNumberHighSierraIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CollectTimesync: %v", err)
 	}
+	logger := NewLogger()
+	parser := NewUnifiedLogParser(provider, logger, cache)
 
 	logData := parseTracev3(t, highSierraArchive, "Special/0000000000000003.tracev3")
-	results, _ := BuildLog(logData, provider, cache, timesyncData, false)
+	results, _ := parser.BuildLog(logData, timesyncData, false)
 	if len(results) != 12058 {
 		t.Fatalf("results len = %d, want 12058", len(results))
 	}
@@ -925,10 +956,12 @@ func TestParseAllLogsHighSierraIntegration(t *testing.T) {
 		t.Fatalf("CollectTimesync: %v", err)
 	}
 	logData := collectLogs(t, provider)
+	logger := NewLogger()
+	parser := NewUnifiedLogParser(provider, logger, cache)
 
 	var logDataVec []LogData
 	for _, logs := range logData {
-		data, _ := BuildLog(logs, provider, cache, timesyncData, false)
+		data, _ := parser.BuildLog(logs, timesyncData, false)
 		logDataVec = append(logDataVec, data...)
 	}
 	if len(logDataVec) != 569796 {
@@ -1079,8 +1112,11 @@ func TestBuildLogMontereyIntegration(t *testing.T) {
 		t.Fatalf("CollectTimesync: %v", err)
 	}
 
+	logger := NewLogger()
+	parser := NewUnifiedLogParser(provider, logger, cache)
+
 	logData := parseTracev3(t, montereyArchive, "Persist/000000000000000a.tracev3")
-	results, _ := BuildLog(logData, provider, cache, timesyncData, false)
+	results, _ := parser.BuildLog(logData, timesyncData, false)
 	if len(results) != 322859 {
 		t.Fatalf("results len = %d, want 322859", len(results))
 	}
@@ -1147,10 +1183,12 @@ func TestParseAllLogsMontereyIntegration(t *testing.T) {
 		t.Fatalf("CollectTimesync: %v", err)
 	}
 	logData := collectLogs(t, provider)
+	logger := NewLogger()
+	parser := NewUnifiedLogParser(provider, logger, cache)
 
 	var logDataVec []LogData
 	for _, logs := range logData {
-		data, _ := BuildLog(logs, provider, cache, timesyncData, false)
+		data, _ := parser.BuildLog(logs, timesyncData, false)
 		logDataVec = append(logDataVec, data...)
 	}
 	if len(logDataVec) != 2397109 {
@@ -1292,9 +1330,11 @@ func TestBuildLogTahoeIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CollectTimesync: %v", err)
 	}
+	logger := NewLogger()
+	parser := NewUnifiedLogParser(provider, logger, cache)
 
 	logData := parseTracev3(t, tahoeArchive, "Persist/000000000000000a.tracev3")
-	results, _ := BuildLog(logData, provider, cache, timesyncData, false)
+	results, _ := parser.BuildLog(logData, timesyncData, false)
 	if len(results) != 305785 {
 		t.Fatalf("results len = %d, want 305785", len(results))
 	}
@@ -1478,8 +1518,11 @@ func TestCheckLogTahoeIntegration(t *testing.T) {
 		t.Fatalf("CollectTimesync: %v", err)
 	}
 
+	logger := NewLogger()
+	parser := NewUnifiedLogParser(provider, logger, cache)
+
 	logData := parseTracev3(t, tahoeArchive, "Persist/0000000000000002.tracev3")
-	results, _ := BuildLog(logData, provider, cache, timesyncData, false)
+	results, _ := parser.BuildLog(logData, timesyncData, false)
 
 	invalidSharedStringOffsets := 0
 	for _, r := range results {
@@ -1501,9 +1544,12 @@ func TestParseAllLogsTahoeIntegration(t *testing.T) {
 	}
 	logData := collectLogs(t, provider)
 
+	logger := NewLogger()
+	parser := NewUnifiedLogParser(provider, logger, cache)
+
 	var logDataVec []LogData
 	for _, logs := range logData {
-		data, _ := BuildLog(logs, provider, cache, timesyncData, false)
+		data, _ := parser.BuildLog(logs, timesyncData, false)
 		logDataVec = append(logDataVec, data...)
 	}
 	if len(logDataVec) != 4288584 {

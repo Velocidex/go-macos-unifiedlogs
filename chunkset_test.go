@@ -1374,7 +1374,10 @@ func TestParseChunkset(t *testing.T) {
 		0, 0, 0, 98, 118, 52, 36,
 	}
 
-	_, chunkset, err := ParseChunkset(testChunkChunkset)
+	logger := NewLogger()
+	c := NewReadCursorFromBuffer(testChunkChunkset)
+	preamble, _ := parsePreamble(c)
+	chunkset, err := ParseChunkset(c, preamble, logger)
 	if err != nil {
 		t.Fatalf("ParseChunkset failed: %v", err)
 	}
@@ -2707,7 +2710,10 @@ func TestChunksetWithOversize(t *testing.T) {
 		0, 0, 0, 0, 0, 0, 0, 8, 109, 16, 63, 96, 1, 0, 0, 0,
 		0, 0, 98, 118, 52, 36,
 	}
-	_, chunkset, err := ParseChunkset(testData)
+	c := NewReadCursorFromBuffer(testData)
+	logger := NewLogger()
+	preamble, _ := parsePreamble(c)
+	chunkset, err := ParseChunkset(c, preamble, logger)
 	if err != nil {
 		t.Fatalf("ParseChunkset failed: %v", err)
 	}
@@ -2738,11 +2744,11 @@ func TestChunksetWithOversize(t *testing.T) {
 }
 
 func TestParseChunksetData(t *testing.T) {
-	buffer := requireTestData(t, "Chunkset Tests/big_sur_chunkset.raw")
+	c := requireTestReadCursor(t, "Chunkset Tests/big_sur_chunkset.raw")
 
 	unifiedLog := UnifiedLogCatalogData{}
-
-	if _, err := ParseChunksetData(buffer, &unifiedLog); err != nil {
+	logger := NewLogger()
+	if err := ParseChunksetData(c, &unifiedLog, logger); err != nil {
 		t.Fatalf("ParseChunksetData failed: %v", err)
 	}
 	if unifiedLog.Catalog.ChunkTag != 0 {
@@ -2784,9 +2790,9 @@ func TestParseFirehoseChunkset(t *testing.T) {
 	buffer := requireTestData(t, "Chunkset Tests/big_sur_firehose_chunkset.raw")
 
 	unifiedLog := UnifiedLogCatalogData{}
-
-	const firehoseChunk uint32 = 0x6001
-	getChunksetData(buffer, firehoseChunk, &unifiedLog)
+	preamble, _ := parsePreamble(NewReadCursorFromBuffer(buffer))
+	logger := NewLogger()
+	getChunksetData(buffer[16:], preamble, &unifiedLog, logger)
 	if len(unifiedLog.Firehose) != 1 {
 		t.Errorf("firehose length = %d, want 1", len(unifiedLog.Firehose))
 	}
@@ -2815,8 +2821,10 @@ func TestParseOversizeChunkset(t *testing.T) {
 
 	unifiedLog := UnifiedLogCatalogData{}
 
-	const oversizeChunk uint32 = 0x6002
-	getChunksetData(buffer, oversizeChunk, &unifiedLog)
+	preamble, _ := parsePreamble(NewReadCursorFromBuffer(buffer))
+
+	logger := NewLogger()
+	getChunksetData(buffer[16:], preamble, &unifiedLog, logger)
 	if len(unifiedLog.Oversize) != 1 {
 		t.Errorf("oversize length = %d, want 1", len(unifiedLog.Oversize))
 	}
@@ -2847,9 +2855,10 @@ func TestParseStatedumpChunkset(t *testing.T) {
 	buffer := requireTestData(t, "Chunkset Tests/big_sur_statedump_chunkset.raw")
 
 	unifiedLog := UnifiedLogCatalogData{}
+	preamble, _ := parsePreamble(NewReadCursorFromBuffer(buffer))
 
-	const statedumpChunk uint32 = 0x6003
-	getChunksetData(buffer, statedumpChunk, &unifiedLog)
+	logger := NewLogger()
+	getChunksetData(buffer[16:], preamble, &unifiedLog, logger)
 	if len(unifiedLog.Statedump) != 1 {
 		t.Fatalf("statedump length = %d, want 1", len(unifiedLog.Statedump))
 	}
@@ -2892,9 +2901,9 @@ func TestParseSimpledumpChunkset(t *testing.T) {
 	buffer := requireTestData(t, "Chunkset Tests/monterey_chunkset_simpledump.raw")
 
 	unifiedLog := UnifiedLogCatalogData{}
-
-	const simpledumpChunk uint32 = 0x6004
-	getChunksetData(buffer, simpledumpChunk, &unifiedLog)
+	preamble, _ := parsePreamble(NewReadCursorFromBuffer(buffer))
+	logger := NewLogger()
+	getChunksetData(buffer[16:], preamble, &unifiedLog, logger)
 	if len(unifiedLog.Simpledump) != 1 {
 		t.Fatalf("simpledump length = %d, want 1", len(unifiedLog.Simpledump))
 	}
@@ -2930,11 +2939,11 @@ func TestParseSimpledumpChunkset(t *testing.T) {
 // TestParseGoldengateChunkset exercises a Golden Gate chunkset. The Rust test is
 // disabled (//#[test]) so this is only run when the test data is available.
 func TestParseGoldengateChunkset(t *testing.T) {
-	buffer := requireTestData(t, "Chunkset Tests/goldengate_chunkset.raw")
-
+	c := requireTestReadCursor(t, "Chunkset Tests/goldengate_chunkset.raw")
+	logger := NewLogger()
 	unifiedLog := UnifiedLogCatalogData{}
 
-	if _, err := ParseChunksetData(buffer, &unifiedLog); err != nil {
+	if err := ParseChunksetData(c, &unifiedLog, logger); err != nil {
 		t.Fatalf("ParseChunksetData failed: %v", err)
 	}
 	if len(unifiedLog.Oversize) != 0 {

@@ -26,7 +26,11 @@ type FirehoseFormatters struct {
 
 // FirehoseFormatterFlags identifies formatter flags associated with the log entry.
 // Formatter flags determine the file where the base format string is located.
-func FirehoseFormatterFlags(data []byte, firehoseFlags uint16, flags *[]MessageFlags) ([]byte, FirehoseFormatters, error) {
+func FirehoseFormatterFlags(
+	data []byte,
+	firehoseFlags uint16,
+	flags *[]MessageFlags,
+	logger *Logger) ([]byte, FirehoseFormatters, error) {
 	var formatterFlags FirehoseFormatters
 
 	const messageStringsUUID = 0x2 // main_exe flag
@@ -47,7 +51,7 @@ func FirehoseFormatterFlags(data []byte, firehoseFlags uint16, flags *[]MessageF
 	*/
 	switch firehoseFlags & flagCheck {
 	case 0x20:
-		logger.Printf("[macos-unifiedlogs] Firehose flag: has_large_offset")
+		logger.Debugf("Firehose flag: has_large_offset")
 		firehoseLargeOffset, err := c.u16()
 		if err != nil {
 			return nil, formatterFlags, err
@@ -55,7 +59,7 @@ func FirehoseFormatterFlags(data []byte, firehoseFlags uint16, flags *[]MessageF
 		formatterFlags.HasLargeOffset = firehoseLargeOffset
 		*flags = append(*flags, MessageFlagsHasLargeOffset)
 		if firehoseFlags&largeSharedCache != 0 {
-			logger.Printf("[macos-unifiedlogs] Firehose flag: large_shared_cache and has_large_offset")
+			logger.Debugf("Firehose flag: large_shared_cache and has_large_offset")
 			firehoseLargeSharedCache, err := c.u16()
 			if err != nil {
 				return nil, formatterFlags, err
@@ -67,7 +71,7 @@ func FirehoseFormatterFlags(data []byte, firehoseFlags uint16, flags *[]MessageF
 			*flags = append(*flags, MessageFlagsSharedCache)
 		}
 	case 0xc:
-		logger.Printf("[macos-unifiedlogs] Firehose flag: large_shared_cache")
+		logger.Debugf(" Firehose flag: large_shared_cache")
 		if firehoseFlags&largeOffset != 0 {
 			firehoseLargeOffset, err := c.u16()
 			if err != nil {
@@ -83,11 +87,11 @@ func FirehoseFormatterFlags(data []byte, firehoseFlags uint16, flags *[]MessageF
 		formatterFlags.LargeSharedCache = firehoseLargeSharedCache
 		*flags = append(*flags, MessageFlagsLargeSharedCache)
 	case 0x8:
-		logger.Printf("[macos-unifiedlogs] Firehose flag: absolute")
+		logger.Debugf(" Firehose flag: absolute")
 		formatterFlags.Absolute = true
 		*flags = append(*flags, MessageFlagsAbsolute)
 		if firehoseFlags&messageStringsUUID == 0 {
-			logger.Printf("[macos-unifiedlogs] Firehose flag: alt index absolute flag")
+			logger.Debugf(" Firehose flag: alt index absolute flag")
 			firehoseUUIDFileIndex, err := c.u16()
 			if err != nil {
 				return nil, formatterFlags, err
@@ -96,11 +100,11 @@ func FirehoseFormatterFlags(data []byte, firehoseFlags uint16, flags *[]MessageF
 			*flags = append(*flags, MessageFlagsAltIndex)
 		}
 	case 0x2:
-		logger.Printf("[macos-unifiedlogs] Firehose flag: main_exe")
+		logger.Debugf(" Firehose flag: main_exe")
 		formatterFlags.MainExe = true
 		*flags = append(*flags, MessageFlagsMainExe)
 	case 0x4:
-		logger.Printf("[macos-unifiedlogs] Firehose flag: shared_cache")
+		logger.Debugf(" Firehose flag: shared_cache")
 		formatterFlags.SharedCache = true
 		*flags = append(*flags, MessageFlagsSharedCache)
 		if firehoseFlags&largeOffset != 0 {
@@ -112,7 +116,7 @@ func FirehoseFormatterFlags(data []byte, firehoseFlags uint16, flags *[]MessageF
 			*flags = append(*flags, MessageFlagsHasLargeOffset)
 		}
 	case 0xa:
-		logger.Printf("[macos-unifiedlogs] Firehose flag: uuid_relative")
+		logger.Debugf(" Firehose flag: uuid_relative")
 		firehoseUUIDRelative, err := c.u128be()
 		if err != nil {
 			return nil, formatterFlags, err
@@ -120,8 +124,8 @@ func FirehoseFormatterFlags(data []byte, firehoseFlags uint16, flags *[]MessageF
 		formatterFlags.UuidRelative = u128Hex(firehoseUUIDRelative)
 		*flags = append(*flags, MessageFlagsUuidRelative)
 	default:
-		logger.Printf("[macos-unifiedlogs] Unknown Firehose formatter flag: %d", firehoseFlags)
-		logger.Printf("[macos-unifiedlogs] Firehose data: %X", data)
+		logger.Printf(" Unknown Firehose formatter flag: %d", firehoseFlags)
+		logger.Printf(" Firehose data: %X", data)
 		*flags = append(*flags, MessageFlagsUnknown)
 		return nil, formatterFlags, fmt.Errorf("unknown firehose formatter flag: %d: %w", firehoseFlags, ErrIncomplete)
 	}

@@ -12,7 +12,8 @@ import (
 )
 
 // openDirectoryErrors converts Open Directory error codes to a message.
-func openDirectoryErrors(errorsData string) string {
+func openDirectoryErrors(
+	errorsData string, logger *Logger) string {
 	messages := map[string]string{
 		"5301":  "ODErrorCredentialsAccountDisabled",
 		"5302":  "ODErrorCredentialsAccountExpired",
@@ -82,14 +83,15 @@ func openDirectoryErrors(errorsData string) string {
 
 	message, ok := messages[errorsData]
 	if !ok {
-		logger.Printf("[macos-unifiedlogs] Unknown open directory error code: %s", errorsData)
+		logger.Printf(" Unknown open directory error code: %s", errorsData)
 		return errorsData
 	}
 	return message
 }
 
 // memberIDType converts Open Directory member ids to a string.
-func memberIDType(memberData string) string {
+func memberIDType(
+	memberData string, logger *Logger) string {
 	messages := map[string]string{
 		"0":  "UID",
 		"1":  "GID",
@@ -106,14 +108,14 @@ func memberIDType(memberData string) string {
 
 	message, ok := messages[memberData]
 	if !ok {
-		logger.Printf("[macos-unifiedlogs] Unknown open directory member id type: %s", memberData)
+		logger.Printf(" Unknown open directory member id type: %s", memberData)
 		return memberData
 	}
 	return message
 }
 
 // memberDetails converts Open Directory member details to a string.
-func memberDetails(memberData string) (string, error) {
+func memberDetails(memberData string, logger *Logger) (string, error) {
 	decodedData, err := decodeStandard(memberData)
 	if err != nil {
 		return "", &DecoderError{
@@ -123,7 +125,7 @@ func memberDetails(memberData string) (string, error) {
 		}
 	}
 
-	_, result, err := getMemberData(decodedData)
+	_, result, err := getMemberData(decodedData, logger)
 	if err != nil {
 		return "", &DecoderError{
 			Input:      []byte(memberData),
@@ -157,7 +159,8 @@ func sidDetails(sidData string) (string, error) {
 }
 
 // getMemberData parses Open Directory membership details data.
-func getMemberData(memberData []byte) ([]byte, string, error) {
+func getMemberData(
+	memberData []byte, logger *Logger) ([]byte, string, error) {
 	c := newCursor(memberData)
 	memberType, err := c.u8()
 	if err != nil {
@@ -191,7 +194,7 @@ func getMemberData(memberData []byte) ([]byte, string, error) {
 		}
 		memberMessage = fmt.Sprintf("group: %d", gid)
 	default:
-		logger.Printf("[macos-unifiedlogs] Unknown open directory member type: %d", memberType)
+		logger.Printf(" Unknown open directory member type: %d", memberType)
 		memberMessage = fmt.Sprintf("Unknown Member type %d: @", memberType)
 	}
 

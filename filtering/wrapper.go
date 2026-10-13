@@ -3,7 +3,7 @@ package filtering
 import (
 	"time"
 
-	unifiedlogs "github.com/predictiple/go-macos-unifiedlogs"
+	unifiedlogs "github.com/Velocidex/go-macos-unifiedlogs"
 )
 
 // A wrapper to the LogData object to present data in a more user

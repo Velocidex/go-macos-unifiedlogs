@@ -1,4 +1,4 @@
-module github.com/predictiple/go-macos-unifiedlogs
+module github.com/Velocidex/go-macos-unifiedlogs
 
 go 1.26.0
 
@@ -6,7 +6,10 @@ require howett.net/plist v1.0.1
 
 require (
 	github.com/alecthomas/kingpin/v2 v2.4.0
+	github.com/alitto/pond/v2 v2.7.2
+	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/pierrec/lz4/v4 v4.1.33
+	www.velocidex.com/golang/vfilter v0.0.0-20260820173147-f8fe490bf569
 )
 
 require (
@@ -16,8 +19,9 @@ require (
 	github.com/alecthomas/participle/v2 v2.1.4 // indirect
 	github.com/alecthomas/repr v0.5.4 // indirect
 	github.com/alecthomas/units v0.0.0-20211218093645-b94a6e3cc137 // indirect
+	github.com/kr/text v0.2.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/rogpeppe/go-internal v1.16.0 // indirect
 	github.com/xhit/go-str2duration/v2 v2.1.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
-	www.velocidex.com/golang/vfilter v0.0.0-20260820173147-f8fe490bf569 // indirect
 )

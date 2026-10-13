@@ -11,8 +11,8 @@ import "testing"
 
 func TestParseTimesyncData(t *testing.T) {
 	buffer := requireTestData(t, "system_logs_big_sur.logarchive/timesync/0000000000000002.timesync")
-
-	timesyncData, err := parseTimesyncData(buffer)
+	logger := NewLogger()
+	timesyncData, err := parseTimesyncData(buffer, logger)
 	if err != nil {
 		t.Fatalf("parseTimesyncData returned error: %v", err)
 	}
@@ -30,29 +30,31 @@ func TestParseTimesyncData(t *testing.T) {
 
 func TestTimesyncBadBootHeader(t *testing.T) {
 	buffer := requireTestData(t, "Bad Data/Timesync/Bad_Boot_header_0000000000000002.timesync")
-
-	_, err := parseTimesyncData(buffer)
+	logger := NewLogger()
+	_, err := parseTimesyncData(buffer, logger)
 	requireErrIncomplete(t, err)
 }
 
 func TestTimesyncBadRecordHeader(t *testing.T) {
 	buffer := requireTestData(t, "Bad Data/Timesync/Bad_Record_header_0000000000000002.timesync")
 
-	_, err := parseTimesyncData(buffer)
+	logger := NewLogger()
+	_, err := parseTimesyncData(buffer, logger)
 	requireErrIncomplete(t, err)
 }
 
 func TestTimesyncBadContent(t *testing.T) {
 	buffer := requireTestData(t, "Bad Data/Timesync/Bad_content_0000000000000002.timesync")
 
-	_, err := parseTimesyncData(buffer)
+	logger := NewLogger()
+	_, err := parseTimesyncData(buffer, logger)
 	requireErrIncomplete(t, err)
 }
 
 func TestTimesyncBadFile(t *testing.T) {
 	buffer := requireTestData(t, "Bad Data/Timesync/BadFile.timesync")
-
-	_, err := parseTimesyncData(buffer)
+	logger := NewLogger()
+	_, err := parseTimesyncData(buffer, logger)
 	if err == nil {
 		t.Fatal("expected error for bad timesync file, got nil")
 	}
@@ -64,7 +66,8 @@ func TestParseTimesync(t *testing.T) {
 		158, 131, 22, 0, 0, 0, 0, 0, 0, 0, 0,
 	}
 	c := newCursor(testData)
-	timesync, err := parseTimesync(c)
+	logger := NewLogger()
+	timesync, err := parseTimesync(c, logger)
 	if err != nil {
 		t.Fatalf("parseTimesync returned error: %v", err)
 	}
@@ -94,7 +97,8 @@ func TestParseTimesyncBoot(t *testing.T) {
 		0, 0, 0, 0,
 	}
 	c := newCursor(testData)
-	timesyncBoot, err := parseTimesyncBoot(c)
+	logger := NewLogger()
+	timesyncBoot, err := parseTimesyncBoot(c, logger)
 	if err != nil {
 		t.Fatalf("parseTimesyncBoot returned error: %v", err)
 	}

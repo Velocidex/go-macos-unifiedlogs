@@ -151,7 +151,7 @@ func getDnsFlags(data []byte) string {
 }
 
 // getDomainName base64 decodes the domain name associated with a log entry.
-func getDomainName(data string) (string, error) {
+func getDomainName(data string, logger *Logger) (string, error) {
 	decodedData, err := decodeStandard(data)
 	if err != nil {
 		return "", &DecoderError{
@@ -161,7 +161,7 @@ func getDomainName(data string) (string, error) {
 		}
 	}
 
-	_, results, err := extractString(decodedData)
+	_, results, err := extractString(decodedData, logger)
 	if err != nil {
 		return "", &DecoderError{
 			Input:      []byte(data),
@@ -182,7 +182,7 @@ func getDomainName(data string) (string, error) {
 }
 
 // getServiceBinding parses a DNS Service Binding record type.
-func getServiceBinding(data string) (string, error) {
+func getServiceBinding(data string, logger *Logger) (string, error) {
 	decodedData, err := decodeStandard(data)
 	if err != nil {
 		return "", &DecoderError{
@@ -192,7 +192,7 @@ func getServiceBinding(data string) (string, error) {
 		}
 	}
 
-	_, result, err := parseSvcb(decodedData)
+	_, result, err := parseSvcb(decodedData, logger)
 	if err != nil {
 		return "", &DecoderError{
 			Input:      []byte(data),
@@ -205,7 +205,7 @@ func getServiceBinding(data string) (string, error) {
 
 // parseSvcb parses a DNS SVC Binding record.
 // Format: https://datatracker.ietf.org/doc/draft-ietf-dnsop-svcb-https/00/
-func parseSvcb(data []byte) ([]byte, string, error) {
+func parseSvcb(data []byte, logger *Logger) ([]byte, string, error) {
 	c := newCursor(data)
 
 	idData, err := c.take(2)
@@ -226,7 +226,7 @@ func parseSvcb(data []byte) ([]byte, string, error) {
 		if err != nil {
 			return nil, "", err
 		}
-		return extractStringSize(c.rest(), uint64(urlSize))
+		return extractStringSize(c.rest(), uint64(urlSize), logger)
 	}
 
 	alpnSize, err := c.u8()
@@ -237,7 +237,7 @@ func parseSvcb(data []byte) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	_, alpnMessage, err := parseSvcbAlpn(alpnData)
+	_, alpnMessage, err := parseSvcbAlpn(alpnData, logger)
 	if err != nil {
 		return nil, "", err
 	}
@@ -252,7 +252,8 @@ func parseSvcb(data []byte) ([]byte, string, error) {
 }
 
 // parseSvcbAlpn parses the Application Layer Protocol Negotiation.
-func parseSvcbAlpn(data []byte) ([]byte, string, error) {
+func parseSvcbAlpn(data []byte,
+	logger *Logger) ([]byte, string, error) {
 	c := newCursor(data)
 	message := "alpn="
 	for !c.isEmpty() {
@@ -264,7 +265,7 @@ func parseSvcbAlpn(data []byte) ([]byte, string, error) {
 		if err != nil {
 			return nil, "", err
 		}
-		_, alpnName, err := extractString(alpnEntry)
+		_, alpnName, err := extractString(alpnEntry, logger)
 		if err != nil {
 			return nil, "", err
 		}

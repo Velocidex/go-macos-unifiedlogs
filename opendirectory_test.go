@@ -11,13 +11,14 @@ import "testing"
 
 func TestErrnoCodesOpenDirectory(t *testing.T) {
 	testData := "1101"
-	result := openDirectoryErrors(testData)
+	logger := NewLogger()
+	result := openDirectoryErrors(testData, logger)
 	if result != "ODErrorSessionProxyVersionMismatch" {
 		t.Errorf("openDirectoryErrors = %q", result)
 	}
 
 	testData = "10000"
-	result = openDirectoryErrors(testData)
+	result = openDirectoryErrors(testData, logger)
 	if result != "ODErrorPluginOperationNotSupported" {
 		t.Errorf("openDirectoryErrors = %q", result)
 	}
@@ -25,13 +26,14 @@ func TestErrnoCodesOpenDirectory(t *testing.T) {
 
 func TestMemberIdType(t *testing.T) {
 	testData := "8"
-	result := memberIDType(testData)
+	logger := NewLogger()
+	result := memberIDType(testData, logger)
 	if result != "USER NFS" {
 		t.Errorf("memberIDType = %q", result)
 	}
 
 	testData = "1"
-	result = memberIDType(testData)
+	result = memberIDType(testData, logger)
 	if result != "GID" {
 		t.Errorf("memberIDType = %q", result)
 	}
@@ -39,7 +41,8 @@ func TestMemberIdType(t *testing.T) {
 
 func TestMemberDetailsUser(t *testing.T) {
 	testData := "I/7///8vTG9jYWwvRGVmYXVsdAA="
-	result, err := memberDetails(testData)
+	logger := NewLogger()
+	result, err := memberDetails(testData, logger)
 	if err != nil {
 		t.Fatalf("memberDetails failed: %v", err)
 	}
@@ -50,7 +53,8 @@ func TestMemberDetailsUser(t *testing.T) {
 
 func TestMemberDetailsGroup(t *testing.T) {
 	testData := "RGNvbS5hcHBsZS5zaGFyZXBvaW50Lmdyb3VwLjEAL0xvY2FsL0RlZmF1bHQA"
-	result, err := memberDetails(testData)
+	logger := NewLogger()
+	result, err := memberDetails(testData, logger)
 	if err != nil {
 		t.Fatalf("memberDetails failed: %v", err)
 	}
@@ -66,7 +70,8 @@ func TestGetMemberData(t *testing.T) {
 		t.Fatalf("decodeStandard failed: %v", err)
 	}
 
-	_, result, err := getMemberData(decodedData)
+	logger := NewLogger()
+	_, result, err := getMemberData(decodedData, logger)
 	if err != nil {
 		t.Fatalf("getMemberData failed: %v", err)
 	}

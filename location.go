@@ -152,7 +152,8 @@ func subharvesterIdentifier(status string) (string, error) {
 }
 
 // Convert Core Location SQLITE code to string
-func sqliteLocation(input string) (string, error) {
+func sqliteLocation(
+	input string, logger *Logger) (string, error) {
 	decodedData, err := decodeStandard(input)
 	if err != nil {
 		return "", &DecoderError{
@@ -162,7 +163,7 @@ func sqliteLocation(input string) (string, error) {
 		}
 	}
 
-	_, result, err := getSqliteData(decodedData)
+	_, result, err := getSqliteData(decodedData, logger)
 	if err != nil {
 		return "", &DecoderError{
 			Input:      []byte(input),
@@ -175,7 +176,8 @@ func sqliteLocation(input string) (string, error) {
 }
 
 // Get the SQLITE error message
-func getSqliteData(input []byte) ([]byte, string, error) {
+func getSqliteData(input []byte,
+	logger *Logger) ([]byte, string, error) {
 	c := newCursor(input)
 	sqliteCode, err := c.u32()
 	if err != nil {
@@ -250,7 +252,7 @@ func getSqliteData(input []byte) ([]byte, string, error) {
 	case 266:
 		message = "SQLITE IO ERR READ"
 	default:
-		logger.Printf("[macos-unifiedlogs] Unknown Core Location sqlite error: %d", sqliteCode)
+		logger.Printf(" Unknown Core Location sqlite error: %d", sqliteCode)
 		message = "Unknown Core Location sqlite error"
 	}
 
@@ -508,11 +510,11 @@ func getLocationTrackerState(input []byte) ([]byte, string, error) {
 func locationTrackerObject(tracker *LocationTrackerState) string {
 	return fmt.Sprintf(
 		`{
-            "distanceFilter":%v, 
-            "desiredAccuracy":%v, 
-            "updatingLocation":%v, 
-            "requestingLocation":%v, 
-            "requestingRanging":%v, 
+            "distanceFilter":%v,
+            "desiredAccuracy":%v,
+            "updatingLocation":%v,
+            "requestingLocation":%v,
+            "requestingRanging":%v,
             "updatingRanging":%v,
             "updatingHeading":%v,
             "headingFilter":%v,
@@ -632,7 +634,8 @@ func ioMessage(data string) (string, error) {
 }
 
 // Parse and get the location Daemon tracker
-func getDaemonStatusTracker(input []byte) ([]byte, string, error) {
+func getDaemonStatusTracker(
+	input []byte, logger *Logger) ([]byte, string, error) {
 	// Slightly outdated but still helpful: https://gist.github.com/razvand/578f94748b624f4d47c1533f5a02b095
 	c := newCursor(input)
 
@@ -712,7 +715,7 @@ func getDaemonStatusTracker(input []byte) ([]byte, string, error) {
 	case 1000:
 		reachabilityStr = "kReachabilityUnachievable"
 	default:
-		logger.Printf("[macos-unifiedlogs] Unknown reachability value: %d", reachability)
+		logger.Printf(" Unknown reachability value: %d", reachability)
 		reachabilityStr = "Unknown reachability value"
 	}
 
@@ -727,7 +730,7 @@ func getDaemonStatusTracker(input []byte) ([]byte, string, error) {
 	case 2:
 		chargerTypeStr = "kChargerTypeUsb"
 	default:
-		logger.Printf("[macos-unifiedlogs] Unknown charger type value: %d", chargerType)
+		logger.Printf(" Unknown charger type value: %d", chargerType)
 		chargerTypeStr = "Unknown charger type value"
 	}
 

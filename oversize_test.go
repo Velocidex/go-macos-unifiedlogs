@@ -297,7 +297,9 @@ func TestParseOversize(t *testing.T) {
 		46, 100, 121, 108, 105, 98, 10, 10, 10, 0,
 	}
 
-	_, results, err := parseOversize(testData)
+	logger := NewLogger()
+	const oversizeChunk uint32 = 0x6002
+	results, err := parseOversize(testData, &LogPreamble{ChunkTag: oversizeChunk}, logger)
 	if err != nil {
 		t.Fatalf("parseOversize returned error: %v", err)
 	}
@@ -384,8 +386,8 @@ func TestGetOversizeStringsBigSur(t *testing.T) {
 	var dataRef uint32 = 1
 	var firstProcID uint64 = 96
 	var secondProcID uint32 = 245
-
-	results := getOversizeStrings(dataRef, firstProcID, secondProcID, data)
+	logger := NewLogger()
+	results := getOversizeStrings(dataRef, firstProcID, secondProcID, data, logger)
 
 	if results[0].MessageStrings != "system kext collection" {
 		t.Errorf("result[0].message_strings = %q, want %q", results[0].MessageStrings, "system kext collection")
@@ -401,8 +403,8 @@ func TestParseOversizePrivateStrings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read failed: %v", err)
 	}
-
-	_, results, err := parseOversize(buffer)
+	logger := NewLogger()
+	results, err := parseOversize(buffer, &LogPreamble{ChunkTag: oversizeChunk}, logger)
 	if err != nil {
 		t.Fatalf("parseOversize returned error: %v", err)
 	}

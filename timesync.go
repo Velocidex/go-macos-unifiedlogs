@@ -37,7 +37,8 @@ type Timesync struct {
 }
 
 // parseTimesyncData parses the Unified Log timesync files.
-func parseTimesyncData(data []byte) (map[string]*TimesyncBoot, error) {
+func parseTimesyncData(
+	data []byte, logger *Logger) (map[string]*TimesyncBoot, error) {
 	timesyncData := make(map[string]*TimesyncBoot)
 	c := newCursor(data)
 
@@ -51,7 +52,7 @@ func parseTimesyncData(data []byte) (map[string]*TimesyncBoot, error) {
 
 		const timesyncSig uint32 = 0x207354
 		if timesyncSignature == timesyncSig {
-			timesync, err := parseTimesync(c)
+			timesync, err := parseTimesync(c, logger)
 			if err != nil {
 				return nil, err
 			}
@@ -64,7 +65,7 @@ func parseTimesyncData(data []byte) (map[string]*TimesyncBoot, error) {
 					timesyncData[timesyncBoot.BootUUID] = timesyncBoot
 				}
 			}
-			timesyncBootData, err := parseTimesyncBoot(c)
+			timesyncBootData, err := parseTimesyncBoot(c, logger)
 			if err != nil {
 				return nil, err
 			}
@@ -80,7 +81,8 @@ func parseTimesyncData(data []byte) (map[string]*TimesyncBoot, error) {
 }
 
 // parseTimesyncBoot parses a timesync boot header record.
-func parseTimesyncBoot(c *cursor) (*TimesyncBoot, error) {
+func parseTimesyncBoot(
+	c *cursor, logger *Logger) (*TimesyncBoot, error) {
 	timesyncSignature, err := c.u16()
 	if err != nil {
 		return nil, err
@@ -88,7 +90,7 @@ func parseTimesyncBoot(c *cursor) (*TimesyncBoot, error) {
 
 	const expectedBootSignature uint16 = 0xbbb0
 	if expectedBootSignature != timesyncSignature {
-		logger.Printf("[macos-unifiedlogs] Incorrect Timesync boot header signature. Expected %d. Got: %d",
+		logger.Printf("Incorrect Timesync boot header signature. Expected %d. Got: %d",
 			expectedBootSignature, timesyncSignature)
 		return nil, fmt.Errorf("incorrect timesync boot header signature: %w", ErrIncomplete)
 	}
@@ -140,7 +142,8 @@ func parseTimesyncBoot(c *cursor) (*TimesyncBoot, error) {
 }
 
 // parseTimesync parses an individual timesync record.
-func parseTimesync(c *cursor) (Timesync, error) {
+func parseTimesync(
+	c *cursor, logger *Logger) (Timesync, error) {
 	timesync := Timesync{}
 
 	timesyncSignature, err := c.u32()
@@ -150,7 +153,7 @@ func parseTimesync(c *cursor) (Timesync, error) {
 
 	const expectedRecordSignature uint32 = 0x207354
 	if expectedRecordSignature != timesyncSignature {
-		logger.Printf("[macos-unifiedlogs] Incorrect Timesync record header signature. Expected %d. Got: %d",
+		logger.Printf("Incorrect Timesync record header signature. Expected %d. Got: %d",
 			expectedRecordSignature, timesyncSignature)
 		return Timesync{}, fmt.Errorf("incorrect timesync record header signature: %w", ErrIncomplete)
 	}

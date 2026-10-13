@@ -37,7 +37,9 @@ func TestParseStatedump(t *testing.T) {
 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		2, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0,
 	}
-	_, results, err := ParseStatedump(statedumpTestdata)
+	logger := NewLogger()
+	results, err := ParseStatedump(
+		statedumpTestdata, &LogPreamble{ChunkTag: statedumpChunk}, logger)
 	if err != nil {
 		t.Fatalf("ParseStatedump failed: %v", err)
 	}
@@ -591,8 +593,9 @@ func TestParseStatedumpPlist(t *testing.T) {
 		0, 1, 96, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		0, 26, 219,
 	}
-
-	_, results, err := ParseStatedump(statedumpPlistTestData)
+	logger := NewLogger()
+	results, err := ParseStatedump(statedumpPlistTestData,
+		&LogPreamble{ChunkTag: statedumpChunk}, logger)
 	if err != nil {
 		t.Fatalf("ParseStatedump failed: %v", err)
 	}
@@ -650,7 +653,7 @@ func TestParseStatedumpPlist(t *testing.T) {
 		t.Errorf("statedump_data = %v, want %v", results.StatedumpData, wantData)
 	}
 
-	plistJSON := ParseStatedumpPlist(results.StatedumpData)
+	plistJSON := ParseStatedumpPlist(results.StatedumpData, logger)
 	if !json.Valid([]byte(plistJSON)) {
 		t.Errorf("ParseStatedumpPlist output is not valid json: %q", plistJSON)
 	}
@@ -660,16 +663,18 @@ func TestParseStatedumpPlist(t *testing.T) {
 }
 
 func TestParseStatedumpPlistBehaviors(t *testing.T) {
-	if got := ParseStatedumpPlist(nil); got != "Empty plist data" {
+	logger := NewLogger()
+	if got := ParseStatedumpPlist(nil, logger); got != "Empty plist data" {
 		t.Errorf("ParseStatedumpPlist(nil) = %q, want %q", got, "Empty plist data")
 	}
-	if got := ParseStatedumpPlist([]byte{0x00, 0x01, 0x02}); got != "Failed to get plist data" {
+	if got := ParseStatedumpPlist([]byte{0x00, 0x01, 0x02}, logger); got != "Failed to get plist data" {
 		t.Errorf("ParseStatedumpPlist(garbage) = %q, want %q", got, "Failed to get plist data")
 	}
 }
 
 func TestParseStatedumpObjectUnsupported(t *testing.T) {
-	got := parseStatedumpObject([]byte{0xde, 0xad}, "Bogus")
+	logger := NewLogger()
+	got := parseStatedumpObject([]byte{0xde, 0xad}, "Bogus", logger)
 	want := "Unsupported Statedump object: Bogus-3q0="
 	if got != want {
 		t.Errorf("parseStatedumpObject = %q, want %q", got, want)
@@ -683,7 +688,8 @@ func TestParseStatedumpObject(t *testing.T) {
 		0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 255, 255, 255, 255,
 		0, 0, 0, 0, 0, 0, 0, 0,
 	}
-	result := parseStatedumpObject(testData, name)
+	logger := NewLogger()
+	result := parseStatedumpObject(testData, name, logger)
 	want := `{"thermalLevel": -1, "reachability": "kReachabilityLarge", "airplaneMode": false, "batteryData":{"wasConnected": false, "charged": false, "level": -1, "connected": false, "chargerType": "kChargerTypeUnknown"}, "restrictedMode": false, "batterySaverModeEnabled": false, "push_service":false}`
 	if !reflect.DeepEqual(result, want) {
 		t.Errorf("parseStatedumpObject = %q, want %q", result, want)

@@ -17,8 +17,8 @@ func TestParseFirehoseSignpost(t *testing.T) {
 		225, 244, 2, 0, 1, 0, 238, 238, 178, 178, 181, 176, 238, 238, 176, 63, 27, 0, 0, 0,
 	}
 	testFlags := uint16(33282)
-
-	_, results, err := parseSignpost(testData, testFlags)
+	logger := NewLogger()
+	_, results, err := parseSignpost(testData, testFlags, logger)
 	if err != nil {
 		t.Fatalf("parseSignpost returned error: %v", err)
 	}
@@ -88,8 +88,8 @@ func TestSignpostPersonaFlag(t *testing.T) {
 		219, 90, 1, 0, 0, 3, 0, 4, 1, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 4, 10, 0, 0, 0,
 	}
 	testFlags := uint16(33380)
-
-	_, results, err := parseSignpost(testData, testFlags)
+	logger := NewLogger()
+	_, results, err := parseSignpost(testData, testFlags, logger)
 	if err != nil {
 		t.Fatalf("parseSignpost returned error: %v", err)
 	}

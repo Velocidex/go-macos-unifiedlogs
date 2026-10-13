@@ -7,13 +7,11 @@
 
 package unifiedlogs
 
-import "io"
-
 // SourceFile provides a single unified log file source. Parsing unified logs requires the
 // name of the original file in order to reconstruct format strings.
 type SourceFile interface {
 	// Reader returns a reader for the source file.
-	Reader() (io.ReadCloser, error)
+	Reader() (*ReadCursor, error)
 	// SourcePath returns the source path of the file on the machine from which it was
 	// collected, distinct from any secondary storage location where, for instance, a file
 	// backing the reader might exist.
@@ -40,6 +38,8 @@ type FileProvider interface {
 	// TimesyncFiles provides the .timesync files from the /var/db/diagnostics/timesync
 	// subdirectory.
 	TimesyncFiles() []SourceFile
+
+	Logger() *Logger
 }
 
 // StringCache defines an interface for caching string values parsed from the dsc or uuidtext

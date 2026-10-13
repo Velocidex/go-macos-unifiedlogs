@@ -60,7 +60,8 @@ func ipvFour(input string) (net.IP, error) {
 }
 
 // sockaddr parses a sockaddr structure.
-func sockaddr(input string) (string, error) {
+func sockaddr(
+	input string, logger *Logger) (string, error) {
 	if input == "" {
 		return "<NULL>", nil
 	}
@@ -74,7 +75,7 @@ func sockaddr(input string) (string, error) {
 		}
 	}
 
-	_, result, err := getSockaddrData(decodedData)
+	_, result, err := getSockaddrData(decodedData, logger)
 	if err != nil {
 		return "", &DecoderError{
 			Input:      []byte(input),
@@ -87,7 +88,8 @@ func sockaddr(input string) (string, error) {
 }
 
 // getSockaddrData gets the sockaddr data.
-func getSockaddrData(input []byte) ([]byte, string, error) {
+func getSockaddrData(
+	input []byte, logger *Logger) ([]byte, string, error) {
 	if len(input) < 2 {
 		return nil, "", ErrEof
 	}
@@ -127,7 +129,7 @@ func getSockaddrData(input []byte) ([]byte, string, error) {
 		}
 		return rest[26:], fmt.Sprintf("%s:%d, Flow ID: %d, Scope ID: %d", ipAddr.String(), port, flow, scope), nil
 	default:
-		logger.Printf("[macos-unifiedlogs] Unknown sockaddr family: %d. From: %v", family, rest)
+		logger.Printf(" Unknown sockaddr family: %d. From: %v", family, rest)
 		return rest, fmt.Sprintf("Unknown sockaddr family: %d", family), nil
 	}
 }

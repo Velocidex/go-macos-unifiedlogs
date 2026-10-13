@@ -8,16 +8,15 @@
 package unifiedlogs
 
 import (
-	"bytes"
 	"reflect"
 	"testing"
 )
 
 func TestParseUnifiedLog(t *testing.T) {
 	path := requireTestDataFile(t, "system_logs_big_sur.logarchive/Persist/0000000000000002.tracev3")
-	buffer := requireTestData(t, "system_logs_big_sur.logarchive/Persist/0000000000000002.tracev3")
-
-	_, results, err := parseUnifiedLog(buffer, path)
+	buffer := requireTestReadCursor(t, "system_logs_big_sur.logarchive/Persist/0000000000000002.tracev3")
+	l := NewLogger()
+	results, err := parseUnifiedLog(buffer, path, l)
 	if err != nil {
 		t.Fatalf("parseUnifiedLog failed: %v", err)
 	}
@@ -34,9 +33,9 @@ func TestParseUnifiedLog(t *testing.T) {
 
 func TestBadLogHeader(t *testing.T) {
 	path := requireTestDataFile(t, "Bad Data/TraceV3/Bad_header_0000000000000005.tracev3")
-	buffer := requireTestData(t, "Bad Data/TraceV3/Bad_header_0000000000000005.tracev3")
-
-	_, results, err := parseUnifiedLog(buffer, path)
+	buffer := requireTestReadCursor(t, "Bad Data/TraceV3/Bad_header_0000000000000005.tracev3")
+	l := NewLogger()
+	results, err := parseUnifiedLog(buffer, path, l)
 	if err != nil {
 		t.Fatalf("parseUnifiedLog returned error: %v", err)
 	}
@@ -53,18 +52,18 @@ func TestBadLogHeader(t *testing.T) {
 
 func TestBadLogContent(t *testing.T) {
 	path := requireTestDataFile(t, "Bad Data/TraceV3/Bad_content_0000000000000005.tracev3")
-	buffer := requireTestData(t, "Bad Data/TraceV3/Bad_content_0000000000000005.tracev3")
-
-	if _, _, err := parseUnifiedLog(buffer, path); err == nil {
+	buffer := requireTestReadCursor(t, "Bad Data/TraceV3/Bad_content_0000000000000005.tracev3")
+	l := NewLogger()
+	if _, err := parseUnifiedLog(buffer, path, l); err == nil {
 		t.Fatal("expected error parsing bad log content, got nil")
 	}
 }
 
 func TestBadLogFile(t *testing.T) {
 	path := requireTestDataFile(t, "Bad Data/TraceV3/00.tracev3")
-	buffer := requireTestData(t, "Bad Data/TraceV3/00.tracev3")
-
-	if _, _, err := parseUnifiedLog(buffer, path); err == nil {
+	buffer := requireTestReadCursor(t, "Bad Data/TraceV3/00.tracev3")
+	l := NewLogger()
+	if _, err := parseUnifiedLog(buffer, path, l); err == nil {
 		t.Fatal("expected error parsing bad log file, got nil")
 	}
 }
@@ -79,13 +78,17 @@ func TestBuildLog(t *testing.T) {
 	}
 
 	path := requireTestDataFile(t, "system_logs_big_sur.logarchive/Persist/0000000000000002.tracev3")
-	buffer := requireTestData(t, "system_logs_big_sur.logarchive/Persist/0000000000000002.tracev3")
-	logData, err := ParseLog(bytes.NewReader(buffer), path)
+	c := requireTestReadCursor(t, "system_logs_big_sur.logarchive/Persist/0000000000000002.tracev3")
+
+	l := NewLogger()
+	parser := NewUnifiedLogParser(provider, l, cache)
+
+	logData, err := ParseLog(c, path, l)
 	if err != nil {
 		t.Fatalf("ParseLog: %v", err)
 	}
 
-	results, _ := BuildLog(logData, provider, cache, timesyncData, false)
+	results, _ := parser.BuildLog(logData, timesyncData, false)
 	if len(results) != 207366 {
 		t.Fatalf("results len = %d, want 207366", len(results))
 	}
@@ -175,7 +178,10 @@ func TestGetHeaderData(t *testing.T) {
 	}
 	data := UnifiedLogData{}
 
-	getHeaderData(testChunkHeader, &data)
+	l := NewLogger()
+	c := NewReadCursorFromBuffer(testChunkHeader)
+	preamble, _ := parsePreamble(c)
+	getHeaderData(c, preamble, &data, l)
 	if len(data.Header) != 1 {
 		t.Fatalf("header len = %d, want 1", len(data.Header))
 	}
@@ -205,8 +211,10 @@ func TestGetCatalogData(t *testing.T) {
 		0, 47, 0,
 	}
 	data := UnifiedLogCatalogData{}
-
-	getCatalogData(testChunkCatalog, &data)
+	c := NewReadCursorFromBuffer(testChunkCatalog)
+	l := NewLogger()
+	preamble, _ := parsePreamble(c)
+	getCatalogData(c, preamble, &data, l)
 	if data.Catalog.ChunkTag != 0x600b {
 		t.Errorf("chunk_tag = %#x, want 0x600b", data.Catalog.ChunkTag)
 	}
@@ -275,12 +283,13 @@ func TestGetCatalogData(t *testing.T) {
 }
 
 func TestGetChunksetData(t *testing.T) {
-	buffer := requireTestData(t, "Chunkset Tests/high_sierra_compressed_chunkset.raw")
+	c := requireTestReadCursor(t, "Chunkset Tests/high_sierra_compressed_chunkset.raw")
 
 	var unifiedLog UnifiedLogCatalogData
 	var logData UnifiedLogData
-
-	getChunksetLogData(buffer, &unifiedLog, &logData)
+	l := NewLogger()
+	preamble, _ := parsePreamble(c)
+	getChunksetLogData(c, preamble, &unifiedLog, &logData, l)
 	if unifiedLog.Catalog.ChunkTag != 0 {
 		t.Errorf("chunk_tag = %d, want 0", unifiedLog.Catalog.ChunkTag)
 	}
@@ -338,8 +347,9 @@ func TestAddMissing(t *testing.T) {
 	var missing UnifiedLogData
 
 	path := requireTestDataFile(t, "system_logs_big_sur.logarchive/Persist/0000000000000002.tracev3")
-	buffer := requireTestData(t, "system_logs_big_sur.logarchive/Persist/0000000000000002.tracev3")
-	logData, err := ParseLog(bytes.NewReader(buffer), path)
+	c := requireTestReadCursor(t, "system_logs_big_sur.logarchive/Persist/0000000000000002.tracev3")
+	l := NewLogger()
+	logData, err := ParseLog(c, path, l)
 	if err != nil {
 		t.Fatalf("ParseLog: %v", err)
 	}

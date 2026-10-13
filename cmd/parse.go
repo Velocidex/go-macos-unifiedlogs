@@ -8,9 +8,9 @@ import (
 	"io"
 	"os"
 
+	unifiedlogs "github.com/Velocidex/go-macos-unifiedlogs"
+	"github.com/Velocidex/go-macos-unifiedlogs/filtering"
 	kingpin "github.com/alecthomas/kingpin/v2"
-	unifiedlogs "github.com/predictiple/go-macos-unifiedlogs"
-	"github.com/predictiple/go-macos-unifiedlogs/filtering"
 	"www.velocidex.com/golang/vfilter"
 	"www.velocidex.com/golang/vfilter/types"
 )
@@ -62,7 +62,9 @@ func doParse() (err error) {
 		scope = filtering.NewScope()
 	}
 
-	provider := unifiedlogs.NewLogarchiveProvider(*parse_command_file_arg)
+	provider := unifiedlogs.NewLogarchiveProvider(
+		*parse_command_file_arg)
+
 	cache := unifiedlogs.NewMemoryStringCache()
 
 	timesyncData, err := unifiedlogs.CollectTimesync(provider)
@@ -87,6 +89,7 @@ func doParse() (err error) {
 		it := &unifiedlogs.UnifiedLogIterator{
 			Data:     data,
 			Evidence: entry.SourcePath(),
+			logger:   provider.Logger(),
 		}
 		for {
 			chunk, ok := it.Next()

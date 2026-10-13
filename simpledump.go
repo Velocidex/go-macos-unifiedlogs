@@ -35,74 +35,65 @@ type SimpleDump struct {
 	MessageString               string `json:"message_string"`
 }
 
-func parseSimpledump(data []byte) ([]byte, SimpleDump, error) {
+func parseSimpledump(
+	data []byte,
+	preamble *LogPreamble,
+	logger *Logger) (SimpleDump, error) {
 	var simpledump SimpleDump
 
 	c := newCursor(data)
-	simpledumpChunkTag, err := c.u32()
-	if err != nil {
-		return nil, simpledump, err
-	}
-	simpledumpChunkSubTag, err := c.u32()
-	if err != nil {
-		return nil, simpledump, err
-	}
-	simpledumpChunkDataSize, err := c.u64()
-	if err != nil {
-		return nil, simpledump, err
-	}
 	simpledumpFirstProcID, err := c.u64()
 	if err != nil {
-		return nil, simpledump, err
+		return simpledump, err
 	}
 	simpledumpSecondProcID, err := c.u64()
 	if err != nil {
-		return nil, simpledump, err
+		return simpledump, err
 	}
 	simpledumpContinousTime, err := c.u64()
 	if err != nil {
-		return nil, simpledump, err
+		return simpledump, err
 	}
 	simpledumpThreadID, err := c.u64()
 	if err != nil {
-		return nil, simpledump, err
+		return simpledump, err
 	}
 	simpledumpUnknownOffset, err := c.u32()
 	if err != nil {
-		return nil, simpledump, err
+		return simpledump, err
 	}
 	simpledumpUnknownTTL, err := c.u16()
 	if err != nil {
-		return nil, simpledump, err
+		return simpledump, err
 	}
 	simpledumpUnknownType, err := c.u16()
 	if err != nil {
-		return nil, simpledump, err
+		return simpledump, err
 	}
 	senderUUID, err := c.u128be()
 	if err != nil {
-		return nil, simpledump, err
+		return simpledump, err
 	}
 	dscUUID, err := c.u128be()
 	if err != nil {
-		return nil, simpledump, err
+		return simpledump, err
 	}
 	simpledumpUnknownNumberMessageStrings, err := c.u32()
 	if err != nil {
-		return nil, simpledump, err
+		return simpledump, err
 	}
 	simpledumpUnknownSizeSubsystemString, err := c.u32()
 	if err != nil {
-		return nil, simpledump, err
+		return simpledump, err
 	}
 	simpledumpUnknownSizeMessageString, err := c.u32()
 	if err != nil {
-		return nil, simpledump, err
+		return simpledump, err
 	}
 
-	simpledump.ChunkTag = simpledumpChunkTag
-	simpledump.ChunkSubtag = simpledumpChunkSubTag
-	simpledump.ChunkDataSize = simpledumpChunkDataSize
+	simpledump.ChunkTag = preamble.ChunkTag
+	simpledump.ChunkSubtag = preamble.ChunkSubTag
+	simpledump.ChunkDataSize = preamble.ChunkDataSize
 	simpledump.ContinousTime = simpledumpContinousTime
 	simpledump.FirstProcID = simpledumpFirstProcID
 	simpledump.SecondProcID = simpledumpSecondProcID
@@ -119,27 +110,27 @@ func parseSimpledump(data []byte) ([]byte, SimpleDump, error) {
 
 	subsystemString, err := c.take(int(simpledumpUnknownSizeSubsystemString))
 	if err != nil {
-		return nil, simpledump, err
+		return simpledump, err
 	}
 	messageString, err := c.take(int(simpledumpUnknownSizeMessageString))
 	if err != nil {
-		return nil, simpledump, err
+		return simpledump, err
 	}
 
 	if len(subsystemString) > 0 {
-		_, subsystem, err := extractString(subsystemString)
+		_, subsystem, err := extractString(subsystemString, logger)
 		if err != nil {
-			return nil, simpledump, err
+			return simpledump, err
 		}
 		simpledump.Subsystem = subsystem
 	}
 	if len(messageString) > 0 {
-		_, message, err := extractString(messageString)
+		_, message, err := extractString(messageString, logger)
 		if err != nil {
-			return nil, simpledump, err
+			return simpledump, err
 		}
 		simpledump.MessageString = message
 	}
 
-	return c.rest(), simpledump, nil
+	return simpledump, nil
 }

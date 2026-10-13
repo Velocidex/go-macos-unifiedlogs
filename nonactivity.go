@@ -25,13 +25,16 @@ type FirehoseNonActivity struct {
 
 // parseNonActivity parses a Non-Activity Type Firehose log entry.
 // Ex: tp 728 + 202: log debug (has_current_aid, main_exe, has_subsystem, has_rules)
-func parseNonActivity(data []byte, firehoseFlags uint16) ([]byte, FirehoseNonActivity, error) {
+func parseNonActivity(
+	data []byte,
+	firehoseFlags uint16,
+	logger *Logger) ([]byte, FirehoseNonActivity, error) {
 	var nonActivity FirehoseNonActivity
 	c := newCursor(data)
 
 	const activityIDCurrent uint16 = 0x1 // has_current_aid flag
 	if (firehoseFlags & activityIDCurrent) != 0 {
-		logger.Printf("[macos-unifiedlogs] Non-Activity Firehose log chunk has has_current_aid flag")
+		logger.Debugf(" Non-Activity Firehose log chunk has has_current_aid flag")
 		firehoseActivityID, err := c.u32()
 		if err != nil {
 			return nil, nonActivity, err
@@ -47,7 +50,7 @@ func parseNonActivity(data []byte, firehoseFlags uint16) ([]byte, FirehoseNonAct
 
 	const hasPersona uint16 = 0x40
 	if (firehoseFlags & hasPersona) != 0 {
-		logger.Printf("[macos-unifiedlogs] Non-Activity Firehose log chunk has has_persona flag")
+		logger.Debugf(" Non-Activity Firehose log chunk has has_persona flag")
 		personaID, err := c.u32()
 		if err != nil {
 			return nil, nonActivity, err
@@ -59,7 +62,7 @@ func parseNonActivity(data []byte, firehoseFlags uint16) ([]byte, FirehoseNonAct
 	const privateStringRange uint16 = 0x100 // has_private_data flag
 	// Entry has private string data. The private data is found after parsing all the public data first
 	if (firehoseFlags & privateStringRange) != 0 {
-		logger.Printf("[macos-unifiedlogs] Non-Activity Firehose log chunk has has_private_data flag")
+		logger.Debugf(" Non-Activity Firehose log chunk has has_private_data flag")
 		firehosePrivateStringsOffset, err := c.u16()
 		if err != nil {
 			return nil, nonActivity, err
@@ -82,7 +85,9 @@ func parseNonActivity(data []byte, firehoseFlags uint16) ([]byte, FirehoseNonAct
 	nonActivity.PCID = firehosePCID
 
 	// Check for flags related to base string format location (shared string file (dsc) or UUID file)
-	remaining, formatters, err := FirehoseFormatterFlags(c.rest(), firehoseFlags, &nonActivity.Flags)
+	remaining, formatters, err := FirehoseFormatterFlags(
+		c.rest(), firehoseFlags,
+		&nonActivity.Flags, logger)
 	if err != nil {
 		return nil, nonActivity, err
 	}
@@ -91,7 +96,7 @@ func parseNonActivity(data []byte, firehoseFlags uint16) ([]byte, FirehoseNonAct
 
 	const subsystem uint16 = 0x200 // has_subsystem flag. In Non-Activity log entries this is the subsystem flag
 	if (firehoseFlags & subsystem) != 0 {
-		logger.Printf("[macos-unifiedlogs] Non-Activity Firehose log chunk has has_subsystem flag")
+		logger.Debugf(" Non-Activity Firehose log chunk has has_subsystem flag")
 		firehoseSubsystem, err := c.u16()
 		if err != nil {
 			return nil, nonActivity, err
@@ -102,7 +107,7 @@ func parseNonActivity(data []byte, firehoseFlags uint16) ([]byte, FirehoseNonAct
 
 	const ttl uint16 = 0x400 // has_rules flag
 	if (firehoseFlags & ttl) != 0 {
-		logger.Printf("[macos-unifiedlogs] Non-Activity Firehose log chunk has has_rules flag")
+		logger.Debugf(" Non-Activity Firehose log chunk has has_rules flag")
 		firehoseTTL, err := c.u8()
 		if err != nil {
 			return nil, nonActivity, err
@@ -113,7 +118,7 @@ func parseNonActivity(data []byte, firehoseFlags uint16) ([]byte, FirehoseNonAct
 
 	const dataRef uint16 = 0x800 // has_oversize flag
 	if (firehoseFlags & dataRef) != 0 {
-		logger.Printf("[macos-unifiedlogs] Non-Activity Firehose log chunk has has_oversize flag")
+		logger.Debugf(" Non-Activity Firehose log chunk has has_oversize flag")
 		firehoseDataRef, err := c.u32()
 		if err != nil {
 			return nil, nonActivity, err

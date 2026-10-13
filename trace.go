@@ -21,7 +21,8 @@ type FirehoseTrace struct {
 
 // parseFirehoseTrace parses a Trace Firehose log entry.
 // Ex: tp 504 + 34: trace default (main_exe)
-func parseFirehoseTrace(data []byte) ([]byte, FirehoseTrace, error) {
+func parseFirehoseTrace(
+	data []byte, logger *Logger) ([]byte, FirehoseTrace, error) {
 	var firehoseTrace FirehoseTrace
 
 	c := newCursor(data)
@@ -49,23 +50,23 @@ func parseFirehoseTrace(data []byte) ([]byte, FirehoseTrace, error) {
 	copy(messageData, firehoseInput)
 	slices.Reverse(messageData)
 
-	firehoseTrace.MessageData = getTraceMessage(messageData)
+	firehoseTrace.MessageData = getTraceMessage(messageData, logger)
 
 	return []byte{}, firehoseTrace, nil
 }
 
 // getTraceMessage gets the Trace message.
-func getTraceMessage(data []byte) FirehoseItemData {
-	_, itemData, err := parseTraceMessage(data)
+func getTraceMessage(data []byte, logger *Logger) FirehoseItemData {
+	_, itemData, err := parseTraceMessage(data, logger)
 	if err != nil {
-		logger.Printf("[macos-unifiedlogs] Could not get Trace message data")
+		logger.Printf(" Could not get Trace message data")
 		return FirehoseItemData{}
 	}
 	return itemData
 }
 
 // parseTraceMessage parses the data associated with the trace message.
-func parseTraceMessage(data []byte) ([]byte, FirehoseItemData, error) {
+func parseTraceMessage(data []byte, logger *Logger) ([]byte, FirehoseItemData, error) {
 	itemData := FirehoseItemData{}
 
 	const minimumMessageSize = 4
@@ -111,7 +112,7 @@ func parseTraceMessage(data []byte) ([]byte, FirehoseItemData, error) {
 		case 8:
 			itemInfoEntry.MessageStrings = fmt.Sprintf("%d", binary.BigEndian.Uint64(messageData))
 		default:
-			logger.Printf("[macos-unifiedlogs] Unhandled size of trace data: %d. Defaulting to size of one", entrySize)
+			logger.Printf(" Unhandled size of trace data: %d. Defaulting to size of one", entrySize)
 			// Mirrors Rust's le_u8 on the taken slice (errors when the slice is empty).
 			sizeCursor := newCursor(messageData)
 			unknownSize, err := sizeCursor.u8()

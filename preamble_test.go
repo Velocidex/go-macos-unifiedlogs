@@ -13,8 +13,8 @@ func TestDetectPreamble(t *testing.T) {
 	testPreambleHeader := []byte{
 		0, 16, 0, 0, 17, 0, 0, 0, 208, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
 	}
-
-	preambleData, err := detectPreamble(testPreambleHeader)
+	c := NewReadCursorFromBuffer(testPreambleHeader)
+	preambleData, err := detectPreamble(c)
 	if err != nil {
 		t.Fatalf("detectPreamble returned error: %v", err)
 	}
@@ -29,7 +29,7 @@ func TestDetectPreamble(t *testing.T) {
 	}
 
 	testCatalogChunk := []byte{11, 96, 0, 0, 17, 0, 0, 0, 176, 31, 0, 0, 0, 0, 0, 0}
-	preambleData, err = parsePreamble(testCatalogChunk)
+	preambleData, err = parsePreamble(NewReadCursorFromBuffer(testCatalogChunk))
 	if err != nil {
 		t.Fatalf("parsePreamble returned error: %v", err)
 	}

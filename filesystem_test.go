@@ -129,7 +129,7 @@ func TestNormalizeUUID(t *testing.T) {
 		"25A8CFC3A9C035F19DBDC16F994EA948": "25A8CFC3A9C035F19DBDC16F994EA948",
 	}
 	for in, want := range cases {
-		got, err := normalizeUUID(in)
+		got, err := NormalizeUUID(in)
 		if err != nil {
 			t.Fatalf("normalizeUUID(%q): %v", in, err)
 		}
@@ -137,7 +137,7 @@ func TestNormalizeUUID(t *testing.T) {
 			t.Errorf("normalizeUUID(%q) = %q, want %q", in, got, want)
 		}
 	}
-	if _, err := normalizeUUID("short"); err == nil {
+	if _, err := NormalizeUUID("short"); err == nil {
 		t.Error("normalizeUUID(short) = nil error, want error")
 	}
 }

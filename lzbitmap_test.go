@@ -13,9 +13,9 @@ import (
 )
 
 func TestDecompressLzbitmap(t *testing.T) {
-	buffer := requireTestData(t, "lzbitmap/lzbitmap_zbm.raw")
-
-	results, err := lzbitmapDecompress(buffer)
+	c := requireTestReadCursor(t, "lzbitmap/lzbitmap_zbm.raw")
+	logger := NewLogger()
+	results, err := lzbitmapDecompress(c, logger)
 	if err != nil {
 		t.Fatalf("lzbitmapDecompress returned error: %v", err)
 	}

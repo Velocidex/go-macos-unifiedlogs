@@ -145,76 +145,61 @@ func nomTakeWhile(data []byte, fn func(byte) bool) ([]byte, []byte) {
 
 // parseFirehosePreamble parses the start of the Firehose data, returning the
 // remaining input after the chunk data (mirrors parse_firehose_preamble).
-func parseFirehosePreamble(firehoseInputData []byte) ([]byte, *FirehosePreamble, error) {
+func parseFirehosePreamble(
+	chunkData []byte,
+	preamble *LogPreamble,
+	logger *Logger) (*FirehosePreamble, error) {
 	firehoseData := &FirehosePreamble{}
-
-	c := newCursor(firehoseInputData)
-	chunkTag, err := c.u32()
-	if err != nil {
-		return nil, nil, err
-	}
-	chunkSubTag, err := c.u32()
-	if err != nil {
-		return nil, nil, err
-	}
-	chunkDataSize, err := c.u64()
-	if err != nil {
-		return nil, nil, err
-	}
-	remaining, chunkData, err := nomTake(c.rest(), chunkDataSize)
-	if err != nil {
-		return nil, nil, err
-	}
 
 	cd := newCursor(chunkData)
 	firstProcID, err := cd.u64()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	secondProcID, err := cd.u32()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	ttl, err := cd.u8()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	collapsed, err := cd.u8()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	unknown, err := cd.take(2)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	dataStart := cd.rest()
 
 	// Private data offset starts here. Public data size includes itself.
 	publicDataSize, err := cd.u16()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	privateDataVirtualOffset, err := cd.u16()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	unknown2, err := cd.u16()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	unknown3, err := cd.u16()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	baseContinousTime, err := cd.u64()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	logData := cd.rest()
 
-	firehoseData.ChunkTag = chunkTag
-	firehoseData.ChunkSubTag = chunkSubTag
-	firehoseData.ChunkDataSize = chunkDataSize
+	firehoseData.ChunkTag = preamble.ChunkTag
+	firehoseData.ChunkSubTag = preamble.ChunkSubTag
+	firehoseData.ChunkDataSize = preamble.ChunkDataSize
 	firehoseData.FirstNumberProcID = firstProcID
 	firehoseData.SecondNumberProcID = secondProcID
 	firehoseData.Collapsed = collapsed
@@ -231,15 +216,16 @@ func parseFirehosePreamble(firehoseInputData []byte) ([]byte, *FirehosePreamble,
 	const publicDataNommedSize uint16 = 16
 	publicRemaining, publicData, err := nomTake(logData, uint64(publicDataSize-publicDataNommedSize))
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Go through all the public data associated with the log Firehose entry.
 	for len(publicData) > 0 {
 		// Start parsing all of them public data.
-		firehoseInput, firehosePublicData, err := parseFirehose(publicData)
+		firehoseInput, firehosePublicData, err := parseFirehose(
+			publicData, logger)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		publicData = firehoseInput
 
@@ -264,14 +250,14 @@ func parseFirehosePreamble(firehoseInputData []byte) ([]byte, *FirehosePreamble,
 			privateDataSize := uint64(privateDataOffsetDefault - privateDataVirtualOffset)
 			_, data, err := nomTake(publicRemaining, privateDataSize)
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 			privateData = data
 		} else {
 			// Jump to start of private data.
 			data, _, err := nomTake(dataStart, uint64(privateDataVirtualOffset))
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 			privateData = data
 		}
@@ -286,18 +272,23 @@ func parseFirehosePreamble(firehoseInputData []byte) ([]byte, *FirehosePreamble,
 			stringOffset := data.FirehoseNonActivity.PrivateStringsOffset - privateDataVirtualOffset
 			privateStringStart, _, err := nomTake(privateData, uint64(stringOffset))
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
-			_, _ = parsePrivateFirehoseData(privateStringStart, &data.Message)
+			_, _ = parsePrivateFirehoseData(
+				privateStringStart, &data.Message, logger)
 		}
 	}
 
-	return remaining, firehoseData, nil
+	return firehoseData, nil
 }
 
 // collectFirehoseItems collects all the Firehose items (log message entries) in
 // the log entry (chunk). Mirrors collect_items.
-func collectFirehoseItems(data []byte, firehoseNumberItems uint8, firehoseFlags uint16) ([]byte, FirehoseItemData, error) {
+func collectFirehoseItems(
+	data []byte,
+	firehoseNumberItems uint8,
+	firehoseFlags uint16,
+	logger *Logger) ([]byte, FirehoseItemData, error) {
 	var itemCount uint8
 	var itemsData []FirehoseItemType
 
@@ -329,7 +320,8 @@ func collectFirehoseItems(data []byte, firehoseNumberItems uint8, firehoseFlags 
 
 		// Firehose number item values immediately follow the item type.
 		if slices.Contains(numberItemType, item.ItemType) {
-			itemValueInput, messageNumber, err := parseFirehoseItemNumber(firehoseInput, uint16(item.ItemTypeSize))
+			itemValueInput, messageNumber, err := parseFirehoseItemNumber(
+				firehoseInput, uint16(item.ItemTypeSize), logger)
 			if err != nil {
 				return nil, FirehoseItemData{}, err
 			}
@@ -357,8 +349,9 @@ func collectFirehoseItems(data []byte, firehoseNumberItems uint8, firehoseFlags 
 	const backtraceSignatureSize = 3
 
 	if (firehoseFlags & hasContextData) != 0 {
-		logger.Printf("[macos-unifiedlogs] Identified Backtrace data in Firehose log chunk")
-		backtraceInput, backtraceData, err := getFirehoseBacktraceData(firehoseInput)
+		logger.Debugf("Identified Backtrace data in Firehose log chunk")
+		backtraceInput, backtraceData, err := getFirehoseBacktraceData(
+			firehoseInput, logger)
 		if err != nil {
 			return nil, FirehoseItemData{}, err
 		}
@@ -371,7 +364,8 @@ func collectFirehoseItems(data []byte, firehoseNumberItems uint8, firehoseFlags 
 			return nil, FirehoseItemData{}, err
 		}
 		if slices.Equal(backtraceSignature, backtraceSig) {
-			backtraceInput, backtraceData, err := getFirehoseBacktraceData(firehoseInput)
+			backtraceInput, backtraceData, err := getFirehoseBacktraceData(
+				firehoseInput, logger)
 			if err != nil {
 				return nil, FirehoseItemData{}, err
 			}
@@ -418,14 +412,15 @@ func collectFirehoseItems(data []byte, firehoseNumberItems uint8, firehoseFlags 
 			break
 		}
 		if slices.Contains(firehoseStringItems, item.ItemType) {
-			itemValueInput, messageString, err := parseFirehoseItemString(firehoseInput, item)
+			itemValueInput, messageString, err := parseFirehoseItemString(
+				firehoseInput, item, logger)
 			if err != nil {
 				return nil, FirehoseItemData{}, err
 			}
 			firehoseInput = itemValueInput
 			item.MessageStrings = messageString
 		} else {
-			logger.Printf("[macos-unifiedlogs] Unknown Firehose item: %d", item.ItemType)
+			logger.Printf("Unknown Firehose item: %d", item.ItemType)
 		}
 	}
 
@@ -435,7 +430,10 @@ func collectFirehoseItems(data []byte, firehoseNumberItems uint8, firehoseFlags 
 
 // parsePrivateFirehoseData parses any private firehose data and updates any
 // firehose items that use private data. Mirrors parse_private_data.
-func parsePrivateFirehoseData(data []byte, firehoseItemData *FirehoseItemData) ([]byte, error) {
+func parsePrivateFirehoseData(
+	data []byte,
+	firehoseItemData *FirehoseItemData,
+	logger *Logger) ([]byte, error) {
 	privateStrings := []uint8{0x21, 0x25, 0x41, 0x35, 0x31, 0x81, 0xf1}
 
 	privateStringStart := data
@@ -476,7 +474,8 @@ func parsePrivateFirehoseData(data []byte, firehoseItemData *FirehoseItemData) (
 					// If the most significant bit is set (0x8000) we need to
 					// clear it to get the real size. Ex: 0x83f8 is really 0x3f8.
 					realSize := firehoseInfo.ItemSize & 0x7fff
-					privateData, privateString, err := extractStringSize(privateStringStart, uint64(realSize))
+					privateData, privateString, err := extractStringSize(
+						privateStringStart, uint64(realSize), logger)
 					if err != nil {
 						return nil, err
 					}
@@ -484,7 +483,9 @@ func parsePrivateFirehoseData(data []byte, firehoseItemData *FirehoseItemData) (
 					firehoseInfo.MessageStrings = privateString
 					continue
 				}
-				privateData, privateString, err := extractStringSize(privateStringStart, uint64(firehoseInfo.ItemSize))
+				privateData, privateString, err := extractStringSize(
+					privateStringStart,
+					uint64(firehoseInfo.ItemSize), logger)
 				if err != nil {
 					return nil, err
 				}
@@ -497,7 +498,8 @@ func parsePrivateFirehoseData(data []byte, firehoseItemData *FirehoseItemData) (
 			if firehoseInfo.ItemSize == privateBitwiseSet || firehoseInfo.ItemSize == 0 {
 				firehoseInfo.MessageStrings = "<private>"
 			} else {
-				privateData, privateString, err := parseFirehoseItemNumber(privateStringStart, firehoseInfo.ItemSize)
+				privateData, privateString, err := parseFirehoseItemNumber(
+					privateStringStart, firehoseInfo.ItemSize, logger)
 				if err != nil {
 					return nil, err
 				}
@@ -511,7 +513,7 @@ func parsePrivateFirehoseData(data []byte, firehoseItemData *FirehoseItemData) (
 
 // parseFirehose parses all the different types of Firehose data (activity,
 // non-activity, loss, trace, signpost). Mirrors parse_firehose.
-func parseFirehose(data []byte) ([]byte, Firehose, error) {
+func parseFirehose(data []byte, logger *Logger) ([]byte, Firehose, error) {
 	firehoseResults := Firehose{}
 
 	c := newCursor(data)
@@ -575,21 +577,23 @@ func parseFirehose(data []byte) ([]byte, Firehose, error) {
 	const remnantData uint8 = 0x0
 
 	if logActivityType == activity {
-		activityData, act, err := parseActivity(firehoseInput, flags, logType)
+		activityData, act, err := parseActivity(firehoseInput, flags, logType, logger)
 		if err != nil {
 			return nil, firehoseResults, err
 		}
 		firehoseInput = activityData
 		firehoseResults.FirehoseActivity = act
 	} else if logActivityType == nonactivity {
-		nonActivityData, nonAct, err := parseNonActivity(firehoseInput, flags)
+		nonActivityData, nonAct, err := parseNonActivity(
+			firehoseInput, flags, logger)
 		if err != nil {
 			return nil, firehoseResults, err
 		}
 		firehoseInput = nonActivityData
 		firehoseResults.FirehoseNonActivity = nonAct
 	} else if logActivityType == signpost {
-		processData, sp, err := parseSignpost(firehoseInput, flags)
+		processData, sp, err := parseSignpost(
+			firehoseInput, flags, logger)
 		if err != nil {
 			return nil, firehoseResults, err
 		}
@@ -603,7 +607,7 @@ func parseFirehose(data []byte) ([]byte, Firehose, error) {
 		firehoseResults.FirehoseLoss = l
 		firehoseInput = lossData
 	} else if logActivityType == trace {
-		traceData, tr, err := parseFirehoseTrace(firehoseInput)
+		traceData, tr, err := parseFirehoseTrace(firehoseInput, logger)
 		if err != nil {
 			return nil, firehoseResults, err
 		}
@@ -614,7 +618,7 @@ func parseFirehose(data []byte) ([]byte, Firehose, error) {
 	} else if logActivityType == remnantData {
 		return input, firehoseResults, nil
 	} else {
-		logger.Printf("[macos-unifiedlogs] Unknown log activity type: %d -  %d bytes left",
+		logger.Printf("Unknown log activity type: %d -  %d bytes left",
 			logActivityType, len(input))
 		return input, firehoseResults, nil
 	}
@@ -641,7 +645,8 @@ func parseFirehose(data []byte) ([]byte, Firehose, error) {
 	firehoseResults.Item = item
 	firehoseResults.NumberItems = numberItems
 
-	_, firehoseItemData, err := collectFirehoseItems(firehoseInput, numberItems, flags)
+	_, firehoseItemData, err := collectFirehoseItems(
+		firehoseInput, numberItems, flags, logger)
 	if err != nil {
 		return nil, firehoseResults, err
 	}
@@ -655,7 +660,7 @@ func parseFirehose(data []byte) ([]byte, Firehose, error) {
 	paddingData := paddingSize8(uint64(dataSize))
 	paddingDataInt, ok := u64ToUint(paddingData)
 	if !ok {
-		logger.Printf("[macos-unifiedlogs] u64 is bigger than system usize")
+		logger.Printf("padding size %d too large: %v", paddingData, ErrTooLarge)
 		return nil, firehoseResults, fmt.Errorf("padding size %d too large: %w", paddingData, ErrTooLarge)
 	}
 	input, _, err = nomTake(input, uint64(paddingDataInt))
@@ -671,7 +676,8 @@ func parseFirehose(data []byte) ([]byte, Firehose, error) {
 
 // getFirehoseBacktraceData parses Backtrace data for the log entry (chunk). This
 // only exists if the `has_context_data` flag is set. Mirrors get_backtrace_data.
-func getFirehoseBacktraceData(data []byte) ([]byte, []string, error) {
+func getFirehoseBacktraceData(
+	data []byte, logger *Logger) ([]byte, []string, error) {
 	c := newCursor(data)
 	if err := c.skip(3); err != nil {
 		return nil, nil, err
@@ -731,7 +737,7 @@ func getFirehoseBacktraceData(data []byte) ([]byte, []string, error) {
 	paddingSize := paddingSizeFour(uint64(offsetCount))
 	paddingSizeInt, ok := u64ToUint(paddingSize)
 	if !ok {
-		logger.Printf("[macos-unifiedlogs] u64 is bigger than system usize")
+		logger.Printf("padding size %d too large: %v", paddingSize, ErrTooLarge)
 		return nil, nil, fmt.Errorf("padding size %d too large: %w", paddingSize, ErrTooLarge)
 	}
 	if err := c.skip(paddingSizeInt); err != nil {
@@ -813,10 +819,12 @@ func getFirehoseItems(data []byte) ([]byte, FirehoseItemType, error) {
 }
 
 // parseFirehoseItemString parses the item string. Mirrors parse_item_string.
-func parseFirehoseItemString(data []byte, item *FirehoseItemType) ([]byte, string, error) {
+func parseFirehoseItemString(
+	data []byte,
+	item *FirehoseItemType, logger *Logger) ([]byte, string, error) {
 	// If message item size is greater than the remaining data, just use the rest of the data.
 	if int(item.ItemSize) > len(data) {
-		return extractStringSize(data, uint64(len(data)))
+		return extractStringSize(data, uint64(len(data)), logger)
 	}
 
 	input, messageData, err := nomTake(data, uint64(item.ItemSize))
@@ -836,7 +844,8 @@ func parseFirehoseItemString(data []byte, item *FirehoseItemType) ([]byte, strin
 		return input, encodeStandard(messageData), nil
 	}
 
-	_, messageString, err := extractStringSize(messageData, uint64(item.ItemSize))
+	_, messageString, err := extractStringSize(
+		messageData, uint64(item.ItemSize), logger)
 	if err != nil {
 		return nil, "", err
 	}
@@ -844,7 +853,9 @@ func parseFirehoseItemString(data []byte, item *FirehoseItemType) ([]byte, strin
 }
 
 // parseFirehoseItemNumber parses the Firehose item number. Mirrors parse_item_number.
-func parseFirehoseItemNumber(data []byte, itemSize uint16) ([]byte, int64, error) {
+func parseFirehoseItemNumber(
+	data []byte, itemSize uint16,
+	logger *Logger) ([]byte, int64, error) {
 	input := data
 	switch itemSize {
 	case 4:
@@ -876,7 +887,7 @@ func parseFirehoseItemNumber(data []byte, itemSize uint16) ([]byte, int64, error
 		}
 		return c.rest(), int64(v), nil
 	default:
-		logger.Printf("[macos-unifiedlogs] Unknown number size support: %d", itemSize)
+		logger.Printf("Unknown number size support: %d", itemSize)
 		return input, -9999, nil
 	}
 }

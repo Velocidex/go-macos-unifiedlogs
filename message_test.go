@@ -17,7 +17,8 @@ func TestFormatFirehoseLogMessage(t *testing.T) {
 	itemMessage := []FirehoseItemType{
 		{MessageStrings: "796.100", ItemType: 34, ItemSize: 0},
 	}
-	logString := FormatFirehoseLogMessage(testData, itemMessage, firehoseMessageRegex)
+	msg_formatter := NewMessageFormatter(NewLogger())
+	logString := msg_formatter.FormatFirehoseLogMessage(testData, itemMessage)
 	want := "opendirectoryd (build 796.100) launched..."
 	if logString != want {
 		t.Errorf("got %q, want %q", logString, want)
@@ -34,7 +35,8 @@ func TestFormatFirehoseLogMessageTricky(t *testing.T) {
 		{ItemType: 66, ItemTypeSize: 4, Offset: 53, ItemSize: 37, MessageStrings: "D8F2438E-AACF-4ED9-AD47-F5A1598215C7"},
 		{ItemType: 0, ItemTypeSize: 8, Offset: 0, ItemSize: 0, MessageStrings: "0"},
 	}
-	logString := FormatFirehoseLogMessage(test, items, firehoseMessageRegex)
+	msg_formatter := NewMessageFormatter(NewLogger())
+	logString := msg_formatter.FormatFirehoseLogMessage(test, items)
 	want := "<SBHMultiplexingManager:D0000749E2E8F40> creating new multiplexing view controller controller <SBHMultiplexingViewController:E0000749C5A5E00> for D8F2438E-AACF-4ED9-AD47-F5A1598215C7 at level: 0"
 	if logString != want {
 		t.Errorf("got  %q\nwant %q", logString, want)
@@ -48,7 +50,8 @@ func TestFormatFirehoseLogMessageTrickyPrecision(t *testing.T) {
 		{ItemType: 34, ItemTypeSize: 4, ItemSize: 26, MessageStrings: "View was recently visible"},
 		{ItemType: 0, ItemTypeSize: 8, ItemSize: 0, MessageStrings: "4642648265865560064"},
 	}
-	logString := FormatFirehoseLogMessage(test, items, firehoseMessageRegex)
+	msg_formatter := NewMessageFormatter(NewLogger())
+	logString := msg_formatter.FormatFirehoseLogMessage(test, items)
 	want := "1201BC1D0 - ProcessThrottlerTimedActivity::activityTimedOut: View was recently visible (timeout: 240 sec)"
 	if logString != want {
 		t.Errorf("got  %q\nwant %q", logString, want)
@@ -66,7 +69,8 @@ func TestBadFormatOptions(t *testing.T) {
 		{MessageStrings: "All", ItemType: 32, ItemSize: 3},
 		{MessageStrings: "89", ItemType: 0, ItemSize: 0},
 	}
-	logString := FormatFirehoseLogMessage(message, items, firehoseMessageRegex)
+	msg_formatter := NewMessageFormatter(NewLogger())
+	logString := msg_formatter.FormatFirehoseLogMessage(message, items)
 	want := "PAVAbstractVideoInterface.cpp::406] DCPAV[258] DCPAVSimpleVideoInterface::setColorElement Setting 3 syncWidth = 0"
 	if logString != want {
 		t.Errorf("got  %q\nwant %q", logString, want)
@@ -80,7 +84,8 @@ func TestParseFormatter(t *testing.T) {
 
 	check := func(format string, want string) {
 		t.Helper()
-		got, err := parseFormatter(format, testMessage, testMessage[0].ItemType, 0)
+		logger := NewLogger()
+		got, err := parseFormatter(format, testMessage, testMessage[0].ItemType, 0, logger)
 		if err != nil {
 			t.Fatalf("parseFormatter(%q): %v", format, err)
 		}
@@ -126,7 +131,8 @@ func TestParseFormatter(t *testing.T) {
 	testMessage[0].ItemSize = 10
 	testMessage[0].ItemType = 0x12
 	testMessage = append(testMessage, FirehoseItemType{MessageStrings: "hi", ItemType: 2, ItemSize: 2})
-	got, err := parseFormatter("%*s", testMessage, testMessage[0].ItemType, 0)
+	logger := NewLogger()
+	got, err := parseFormatter("%*s", testMessage, testMessage[0].ItemType, 0, logger)
 	if err != nil {
 		t.Fatalf("parseFormatter(%%*s): %v", err)
 	}
@@ -139,7 +145,8 @@ func TestParseTypeFormatter(t *testing.T) {
 	testMessage := []FirehoseItemType{
 		{MessageStrings: "test", ItemType: 2, ItemSize: 4},
 	}
-	got, err := parseTypeFormatter("%{public}s", testMessage, testMessage[0].ItemType, 0)
+	logger := NewLogger()
+	got, err := parseTypeFormatter("%{public}s", testMessage, testMessage[0].ItemType, 0, logger)
 	if err != nil {
 		t.Fatalf("parseTypeFormatter: %v", err)
 	}
@@ -150,7 +157,8 @@ func TestParseTypeFormatter(t *testing.T) {
 	signpost := []FirehoseItemType{
 		{MessageStrings: "1", ItemType: 2, ItemSize: 4},
 	}
-	got, err = parseTypeFormatter("%{public, signpost.description:begin_time}llu", signpost, signpost[0].ItemType, 0)
+
+	got, err = parseTypeFormatter("%{public, signpost.description:begin_time}llu", signpost, signpost[0].ItemType, 0, logger)
 	if err != nil {
 		t.Fatalf("parseTypeFormatter signpost: %v", err)
 	}
@@ -179,7 +187,8 @@ func TestFormatMessagePadding(t *testing.T) {
 		numberFormat: numberFormatDecimal,
 		padding:      paddingZero,
 	}
-	formatMessagePadding(&message)
+	logger := NewLogger()
+	formatMessagePadding(&message, logger)
 	if message.message != "2000" {
 		t.Errorf("got %q, want 2000", message.message)
 	}
@@ -195,7 +204,8 @@ func TestFormatMessagePaddingRight(t *testing.T) {
 		numberFormat: numberFormatDecimal,
 		padding:      paddingZero,
 	}
-	formatMessagePadding(&message)
+	logger := NewLogger()
+	formatMessagePadding(&message, logger)
 	if message.message != "0002" {
 		t.Errorf("got %q, want 0002", message.message)
 	}
@@ -212,7 +222,8 @@ func TestFormatMessagePaddingSpaceLeft(t *testing.T) {
 		numberFormat: numberFormatDecimal,
 		padding:      paddingSpace,
 	}
-	formatMessagePadding(&message)
+	logger := NewLogger()
+	formatMessagePadding(&message, logger)
 	if message.message != "2   " {
 		t.Errorf("got %q, want %q", message.message, "2   ")
 	}
@@ -229,7 +240,8 @@ func TestFormatMessagePaddingRightSpace(t *testing.T) {
 		numberFormat: numberFormatDecimal,
 		padding:      paddingSpace,
 	}
-	formatMessagePadding(&message)
+	logger := NewLogger()
+	formatMessagePadding(&message, logger)
 	if message.message != "   2" {
 		t.Errorf("got %q, want %q", message.message, "   2")
 	}
@@ -246,7 +258,8 @@ func TestFormatLeft(t *testing.T) {
 		numberFormat: numberFormatDecimal,
 		padding:      paddingZero,
 	}
-	formatMessage(&message)
+	logger := NewLogger()
+	formatMessage(&message, logger)
 	if message.message != "2" {
 		t.Errorf("got %q, want 2", message.message)
 	}
@@ -263,20 +276,23 @@ func TestFormatRight(t *testing.T) {
 		numberFormat: numberFormatDecimal,
 		padding:      paddingZero,
 	}
-	formatMessage(&message)
+	logger := NewLogger()
+	formatMessage(&message, logger)
 	if message.message != "2" {
 		t.Errorf("got %q, want 2", message.message)
 	}
 }
 
 func TestParseFloat(t *testing.T) {
-	if got := parseFloat("4611911198408756429"); got != 2.1 {
+	logger := NewLogger()
+	if got := parseFloat("4611911198408756429", logger); got != 2.1 {
 		t.Errorf("got %v, want 2.1", got)
 	}
 }
 
 func TestParseInt(t *testing.T) {
-	if got := parseInt("2"); got != 2 {
+	logger := NewLogger()
+	if got := parseInt("2", logger); got != 2 {
 		t.Errorf("got %v, want 2", got)
 	}
 }

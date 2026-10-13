@@ -17,14 +17,13 @@ type LogPreamble struct {
 // detectPreamble gets the preamble (first 16 bytes of all Unified Log entries
 // (chunks)) to detect the log (chunk) type. Ex: Firehose, Statedump,
 // Simpledump, Catalog, etc. Does not consume the input.
-func detectPreamble(data []byte) (*LogPreamble, error) {
-	return parsePreamble(data)
+func detectPreamble(c *ReadCursor) (*LogPreamble, error) {
+	return parsePreamble(c)
 }
 
 // parsePreamble gets the preamble (first 16 bytes of all Unified Log entries
 // (chunks)) to detect the log (chunk) type and consumes the input.
-func parsePreamble(data []byte) (*LogPreamble, error) {
-	c := newCursor(data)
+func parsePreamble(c *ReadCursor) (*LogPreamble, error) {
 	chunkTag, err := c.u32()
 	if err != nil {
 		return nil, err
