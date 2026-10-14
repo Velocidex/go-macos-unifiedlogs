@@ -153,3 +153,11 @@ func unixEpochToISO(timestamp int64) string {
 	t := time.Unix(0, timestamp).UTC()
 	return t.Format("2006-01-02T15:04:05.000000000Z")
 }
+
+func convertToStrings(in []MessageFlags) (res []string) {
+	res = make([]string, 0, len(in))
+	for _, f := range in {
+		res = append(res, string(f))
+	}
+	return res
+}

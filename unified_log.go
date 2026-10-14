@@ -79,28 +79,37 @@ type UnifiedLogCatalogData struct {
 
 // LogData is a single parsed Unified Log entry.
 type LogData struct {
-	Time             time.Time          `json:"time"`
-	Subsystem        string             `json:"subsystem"`
-	ThreadID         uint64             `json:"thread_id"`
-	PID              uint64             `json:"pid"`
-	EUID             uint32             `json:"euid"`
-	Library          string             `json:"library"`
-	LibraryUUID      string             `json:"library_uuid"`
-	ActivityID       uint64             `json:"activity_id"`
-	ParentActivityID uint64             `json:"parent_activity_id"`
-	Category         string             `json:"category"`
-	EventType        EventType          `json:"event_type"`
-	LogType          LogType            `json:"log_type"`
-	Process          string             `json:"process"`
-	ProcessUUID      string             `json:"process_uuid"`
-	Message          string             `json:"message"`
-	RawMessage       string             `json:"raw_message"`
-	BootUUID         string             `json:"boot_uuid"`
-	TimezoneName     string             `json:"timezone_name"`
-	MessageEntries   []FirehoseItemType `json:"message_entries,omitempty"`
-	MessageStrings   []string           `json:"message_strings,omitempty"`
-	MessageFlags     []MessageFlags     `json:"message_flags"`
-	Evidence         string             `json:"evidence"`
+	Time             time.Time `json:"Time"`
+	Subsystem        string    `json:"Subsystem"`
+	ThreadID         uint64    `json:"ThreadID"`
+	PID              uint64    `json:"PID"`
+	EUID             uint32    `json:"EUID"`
+	Library          string    `json:"Library"`
+	LibraryUUID      string    `json:"LibraryUUID"`
+	ActivityID       uint64    `json:"ActivityID"`
+	ParentActivityID uint64    `json:"ParentActivityID"`
+	Category         string    `json:"Category"`
+	EventType        string    `json:"EventType"`
+	LogType          string    `json:"LogType"`
+	Process          string    `json:"Process"`
+	ProcessUUID      string    `json:"ProcessUUID"`
+	Message          string    `json:"Message"`
+	RawMessage       string    `json:"RawMessage"`
+	BootUUID         string    `json:"BootUUID"`
+	TimezoneName     string    `json:"TimezoneName"`
+	MessageFlags     []string  `json:"MessageFlags"`
+	Evidence         string    `json:"Evidence"`
+
+	// Private member exposed through MessageStrings()
+	_MessageEntries []FirehoseItemType `json:"-"`
+}
+
+func (self *LogData) MessageStrings() (res []string) {
+	res = []string{}
+	for _, e := range self._MessageEntries {
+		res = append(res, e.MessageStrings)
+	}
+	return res
 }
 
 // parseUnifiedLog parses the Unified log data read from a tracev3 file.
@@ -221,15 +230,15 @@ func (self *UnifiedLogParser) BuildLog(unifiedLogData *UnifiedLogData,
 						preamble.FirstNumberProcID,
 						preamble.SecondNumberProcID, logger),
 					Time:      time.Unix(0, timestamp).UTC(),
-					LogType:   getLogType(firehose.LogType, firehose.LogActivityType),
-					EventType: getEventType(firehose.LogActivityType),
+					LogType:   string(getLogType(firehose.LogType, firehose.LogActivityType)),
+					EventType: string(getEventType(firehose.LogActivityType)),
 					EUID: catalogData.Catalog.GetEUID(
 						preamble.FirstNumberProcID,
 						preamble.SecondNumberProcID, logger),
-					BootUUID:       bootUUID,
-					TimezoneName:   timezoneName,
-					MessageEntries: firehose.Message.ItemInfo,
-					Evidence:       unifiedLogData.Evidence,
+					BootUUID:        bootUUID,
+					TimezoneName:    timezoneName,
+					_MessageEntries: firehose.Message.ItemInfo,
+					Evidence:        unifiedLogData.Evidence,
 				}
 
 				// 0x4 - Non-activity log entry. Ex: log default, log error, etc
@@ -249,7 +258,7 @@ func (self *UnifiedLogParser) BuildLog(unifiedLogData *UnifiedLogData,
 						preamble.SecondNumberProcID,
 						&catalogData.Catalog,
 					)
-					logData.MessageFlags = firehose.FirehoseNonActivity.Flags
+					logData.MessageFlags = convertToStrings(firehose.FirehoseActivity.Flags)
 					if err == nil {
 						logData.Library = messageData.Library
 						logData.LibraryUUID = messageData.LibraryUUID
@@ -310,8 +319,8 @@ func (self *UnifiedLogParser) BuildLog(unifiedLogData *UnifiedLogData,
 					}
 				case 0x7:
 					// No message data in loss entries
-					logData.EventType = EventTypeLoss
-					logData.LogType = LogTypeLoss
+					logData.EventType = string(EventTypeLoss)
+					logData.LogType = string(LogTypeLoss)
 				case 0x2:
 					// When has_other_current_aid (0x200) is set, id3 is the new
 					// activity and id1 is the parent. Otherwise id1 is the new
@@ -322,7 +331,9 @@ func (self *UnifiedLogParser) BuildLog(unifiedLogData *UnifiedLogData,
 					} else {
 						logData.ActivityID = uint64(firehose.FirehoseActivity.ActivityID)
 					}
-					logData.MessageFlags = firehose.FirehoseActivity.Flags
+
+					// Coerce to string
+					logData.MessageFlags = convertToStrings(firehose.FirehoseActivity.Flags)
 					_, messageData, err := getFirehoseActivityStrings(
 						&firehose.FirehoseActivity,
 						self.provider,
@@ -358,7 +369,7 @@ func (self *UnifiedLogParser) BuildLog(unifiedLogData *UnifiedLogData,
 					}
 				case 0x6:
 					logData.ActivityID = uint64(firehose.FirehoseSignpost.ActivityID)
-					logData.MessageFlags = firehose.FirehoseSignpost.Flags
+					logData.MessageFlags = convertToStrings(firehose.FirehoseSignpost.Flags)
 					_, messageData, err := getFirehoseSignpost(
 						&firehose.FirehoseSignpost,
 						self.provider,
@@ -481,8 +492,8 @@ func (self *UnifiedLogParser) BuildLog(unifiedLogData *UnifiedLogData,
 				ThreadID:     simpledump.ThreadID,
 				PID:          simpledump.FirstProcID,
 				Time:         time.Unix(0, timestamp).UTC(),
-				LogType:      LogTypeSimpledump,
-				EventType:    EventTypeSimpledump,
+				LogType:      string(LogTypeSimpledump),
+				EventType:    string(EventTypeSimpledump),
 				Message:      simpledump.MessageString,
 				BootUUID:     bootUUID,
 				TimezoneName: timezoneName,
@@ -564,9 +575,9 @@ func (self *UnifiedLogParser) BuildLog(unifiedLogData *UnifiedLogData,
 				PID:        statedump.FirstProcID,
 				ActivityID: statedump.ActivityID,
 				Time:       time.Unix(0, timestamp).UTC(),
-				EventType:  EventTypeStatedump,
+				EventType:  string(EventTypeStatedump),
 				Message:    "title: " + statedump.TitleName + "\nObject Type: " + statedump.DecoderLibrary + "\nObject Type: " + statedump.DecoderType + "\n" + dataString,
-				LogType:    LogTypeStatedump,
+				LogType:    string(LogTypeStatedump),
 				EUID: catalogData.Catalog.GetEUID(
 					statedump.FirstProcID,
 					statedump.SecondProcID, logger),

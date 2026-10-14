@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
+	"log"
 	"os"
+	"sync"
 
 	unifiedlogs "github.com/Velocidex/go-macos-unifiedlogs"
 	"github.com/Velocidex/go-macos-unifiedlogs/filtering"
@@ -31,8 +31,13 @@ var (
 )
 
 func doParse() (err error) {
+	count := &Counter{}
+
 	if *verbose_flag {
-		unifiedlogs.SetLogOutput(os.Stderr)
+		defer func() {
+			fmt.Fprintf(os.Stderr, "Parsed %v events. Stats %#v",
+				count.Get(), unifiedlogs.GetStats())
+		}()
 	}
 
 	var printer func(l interface{})
@@ -64,59 +69,43 @@ func doParse() (err error) {
 
 	provider := unifiedlogs.NewLogarchiveProvider(
 		*parse_command_file_arg)
-
-	cache := unifiedlogs.NewMemoryStringCache()
-
-	timesyncData, err := unifiedlogs.CollectTimesync(provider)
 	if err != nil {
 		return err
 	}
 
-	// Oversize entries hold large strings that do not fit in a normal log record and
-	// must be carried forward across chunks.
-	oversize := &unifiedlogs.UnifiedLogData{}
-	for _, entry := range provider.Tracev3Files() {
-		r, err := entry.Reader()
-		if err != nil {
-			return err
+	if *verbose_flag {
+		provider.SetLogger(log.New(os.Stderr, "", 0))
+	}
+	unifiedlogs.ResetStats()
+
+	parser := unifiedlogs.NewUnifiedLogParser(
+		provider, provider.Logger(),
+		unifiedlogs.NewMemoryStringCache(),
+		unifiedlogs.ParserOptions{
+			Threads: 5,
+		},
+	)
+
+	events, err := parser.Parse(ctx)
+	if err != nil {
+		return err
+	}
+
+	for l := range events {
+		// Evaluate the filter on the row and only allow
+		// it when it matches.
+		if scope != nil &&
+			!filterLog(ctx, scope, vql_filter, &l) {
+			continue
 		}
-		data, err := io.ReadAll(r)
-		r.Close()
-		if err != nil {
-			return err
-		}
 
-		it := &unifiedlogs.UnifiedLogIterator{
-			Data:     data,
-			Evidence: entry.SourcePath(),
-			logger:   provider.Logger(),
-		}
-		for {
-			chunk, ok := it.Next()
-			if !ok {
-				break
-			}
-			chunk.Oversize = append(chunk.Oversize, oversize.Oversize...)
-			logs, missing := unifiedlogs.BuildLog(chunk, provider, cache, timesyncData, true)
-			oversize.Oversize = chunk.Oversize
-			_ = missing
+		select {
+		case <-ctx.Done():
+			return
 
-			for _, l := range logs {
-				// Evaluate the filter on the row and only allow
-				// it when it matches.
-				if scope != nil &&
-					!filterLog(ctx, scope, vql_filter, &l) {
-					continue
-				}
-
-				printer(filtering.WrapLogData(&l))
-
-				select {
-				case <-ctx.Done():
-					return errors.New("Cancelled!")
-				default:
-				}
-			}
+		default:
+			printer(filtering.WrapLogData(&l))
+			count.Inc()
 		}
 	}
 
@@ -163,4 +152,23 @@ func init() {
 		}
 		return true
 	})
+}
+
+type Counter struct {
+	mu    sync.Mutex
+	value int
+}
+
+func (self *Counter) Inc() {
+	self.mu.Lock()
+	defer self.mu.Unlock()
+
+	self.value++
+}
+
+func (self *Counter) Get() int {
+	self.mu.Lock()
+	defer self.mu.Unlock()
+
+	return self.value
 }

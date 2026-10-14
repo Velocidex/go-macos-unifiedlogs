@@ -266,6 +266,10 @@ func (p *LiveSystemProvider) Logger() *Logger {
 	return p.logger
 }
 
+func (p *LiveSystemProvider) SetLogger(log *Logger) {
+	p.logger = log
+}
+
 // NewLogarchiveProvider returns a new LogarchiveProvider rooted at path.
 func NewLogarchiveProvider(path string) *LogarchiveProvider {
 	return &LogarchiveProvider{

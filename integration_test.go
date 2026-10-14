@@ -1395,8 +1395,8 @@ func TestBuildLogTahoeIntegration(t *testing.T) {
 	if r.RawMessage != "SecKeyCreateWithData" {
 		t.Errorf("raw_message = %q", r.RawMessage)
 	}
-	if len(r.MessageEntries) != 0 {
-		t.Errorf("message_entries len = %d, want 0", len(r.MessageEntries))
+	if len(r._MessageEntries) != 0 {
+		t.Errorf("message_entries len = %d, want 0", len(r._MessageEntries))
 	}
 	if !strings.HasSuffix(r.Evidence, "000000000000000a.tracev3") {
 		t.Errorf("evidence = %q", r.Evidence)
@@ -1457,8 +1457,8 @@ func TestBuildLogTahoeIntegration(t *testing.T) {
 	if r45.RawMessage != "dlsym cannot find symbol %{public}@ in %{public}@: %s" {
 		t.Errorf("raw_message = %q", r45.RawMessage)
 	}
-	if len(r45.MessageEntries) == 0 || r45.MessageEntries[0].MessageStrings != "odm_RecordRemoveValue" {
-		t.Errorf("message_entries[0].message_strings mismatch: %#v", r45.MessageEntries)
+	if len(r45._MessageEntries) == 0 || r45._MessageEntries[0].MessageStrings != "odm_RecordRemoveValue" {
+		t.Errorf("message_entries[0].message_strings mismatch: %#v", r45._MessageEntries)
 	}
 	if !strings.HasSuffix(r45.Evidence, "000000000000000a.tracev3") {
 		t.Errorf("evidence = %q", r45.Evidence)
@@ -1473,7 +1473,7 @@ func TestBuildLogTahoeIntegration(t *testing.T) {
 		if strings.Contains(entry.Time.Format(time.RFC3339), "2026-04-20T00:42") {
 			midnight++
 		}
-		for _, value := range entry.MessageEntries {
+		for _, value := range entry._MessageEntries {
 			if value.Item == FirehoseItemUnknown {
 				t.Fatalf("unexpected Unknown item in %#v", value)
 			}

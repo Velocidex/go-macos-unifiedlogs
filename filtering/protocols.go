@@ -130,10 +130,10 @@ func (self LogDataAssociative) Associative(
 		return log.TimezoneName, true
 
 		// Simplify these fields.
-	case "MessageEntries", "message_entries":
-		return WrapLogData(log).MessageEntries, true
+	case "MessageStrings", "message_strings":
+		return log.MessageStrings, true
 	case "Timestamp", "timestamp":
-		return WrapLogData(log).Timestamp, true
+		return log.Time, true
 
 	case "MessageFlags", "message_flags":
 		return log.MessageFlags, true
@@ -153,7 +153,7 @@ func (self LogDataAssociative) GetMembers(
 		"category", "event_type", "log_type",
 		"process", "process_uuid", "message",
 		"raw_message", "boot_uuid", "timezone_name",
-		"message_entries", "timestamp", "message_flags",
+		"message_strings", "timestamp", "message_flags",
 		"evidence",
 	}
 }
