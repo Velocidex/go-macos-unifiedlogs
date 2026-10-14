@@ -9,7 +9,6 @@ package unifiedlogs
 
 import (
 	"fmt"
-	"math"
 )
 
 // TimesyncBoot contains the timesync boot data associated with the Unified Log.
@@ -208,19 +207,16 @@ func parseTimesync(
 //
 // Add results to timesync_walltime (unix epoch in nanoseconds).
 // Final results is unix epoch timestamp in nanoseconds.
-func getTimestamp(timesyncData map[string]*TimesyncBoot, bootUUID string, firehoseLogDeltaTime, firehosePreambleTime uint64) float64 {
-	var timesyncContinousTime uint64
+func getTimestamp(timesyncData map[string]*TimesyncBoot,
+	bootUUID string,
+	firehoseLogDeltaTime, firehosePreambleTime uint64) int64 {
+
+	var timesyncContinousTime int64
 	var timesyncWalltime int64
 
 	// Apple Intel uses 1/1 as the timebase
-	timebaseAdjustment := 1.0
-	if timesync, ok := timesyncData[bootUUID]; ok {
-		if timesync.TimebaseNumerator == 125 && timesync.TimebaseDenominator == 3 {
-			// For Apple Silicon (ARM) we need to adjust the mach time by
-			// multiplying by 125.0/3.0 to get the accurate nanosecond count
-			timebaseAdjustment = 125.0 / 3.0
-		}
-
+	timesync, ok := timesyncData[bootUUID]
+	if ok {
 		// A preamble time of 0 means we need to use the timesync header boot
 		// time as our minimum value. We also set the timesync_continous_time to zero.
 		if firehosePreambleTime == 0 {
@@ -230,19 +226,31 @@ func getTimestamp(timesyncData map[string]*TimesyncBoot, bootUUID string, fireho
 		for _, timesyncRecord := range timesync.Timesync {
 			if timesyncRecord.KernelTime > firehoseLogDeltaTime {
 				if timesyncContinousTime == 0 && timesyncWalltime == 0 {
-					timesyncContinousTime = timesyncRecord.KernelTime
+					timesyncContinousTime = int64(timesyncRecord.KernelTime)
 					timesyncWalltime = timesyncRecord.Walltime
 				}
 				break
 			}
 
-			timesyncContinousTime = timesyncRecord.KernelTime
+			timesyncContinousTime = int64(timesyncRecord.KernelTime)
 			timesyncWalltime = timesyncRecord.Walltime
 		}
 	}
 
-	// Equivalent to Rust's (firehose_log_delta_time as f64).mul_add(
-	// timebase_adjustment, -(timesync_continous_time as f64) * timebase_adjustment)
-	continousTime := math.FMA(float64(firehoseLogDeltaTime), timebaseAdjustment, -float64(timesyncContinousTime)*timebaseAdjustment)
-	return continousTime + float64(timesyncWalltime)
+	continousTime := int64(firehoseLogDeltaTime)
+
+	if timesync != nil &&
+		timesync.TimebaseNumerator == 125 &&
+		timesync.TimebaseDenominator == 3 {
+
+		// For Apple Silicon (ARM) we need to adjust the mach time by
+		// multiplying by 125.0/3.0 to get the accurate nanosecond count
+		continousTime *= 125
+		continousTime /= 3
+
+		timesyncContinousTime *= 125
+		timesyncContinousTime /= 3
+	}
+
+	return continousTime - timesyncContinousTime + timesyncWalltime
 }

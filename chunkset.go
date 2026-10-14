@@ -129,7 +129,7 @@ func ParseChunksetData(c *ReadCursor,
 
 	// Loop through decompressed chunkset data until all log entries (chunks) are read
 	for {
-		preamble, err := detectPreamble(c)
+		preamble, err := parsePreamble(c)
 		if err == io.EOF {
 			return nil
 		}

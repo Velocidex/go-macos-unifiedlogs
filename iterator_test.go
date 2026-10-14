@@ -16,10 +16,16 @@ func TestUnifiedLogIterator(t *testing.T) {
 		Reader:   c,
 		Header:   nil,
 		Evidence: "0000000000000002.tracev3",
+		Logger:   NewLogger(),
 	}
 
+	var chunks []*UnifiedLogData
 	total := 0
 	for {
+		if len(chunks) == 55 {
+			UlogsBreak()
+		}
+
 		chunk, ok := it.Next()
 		if !ok {
 			break
@@ -42,7 +48,7 @@ func TestUnifiedLogIterator(t *testing.T) {
 				t.Errorf("statedump len = %d, want 0", len(chunk.CatalogData[0].Statedump))
 			}
 		}
-
+		chunks = append(chunks, chunk)
 		total += len(chunk.CatalogData)
 	}
 
@@ -64,6 +70,7 @@ func TestUnifiedLogIteratorBuildLog(t *testing.T) {
 		Reader:   c,
 		Header:   nil,
 		Evidence: "0000000000000002.tracev3",
+		Logger:   NewLogger(),
 	}
 
 	cache := NewMemoryStringCache()
@@ -81,7 +88,7 @@ func TestUnifiedLogIteratorBuildLog(t *testing.T) {
 		excludeMissing := false
 		results, _ := parser.BuildLog(chunk, timesyncData, excludeMissing)
 
-		if len(results) > 10 && results[10].Time == 1642302327364384800.0 {
+		if len(results) > 10 && results[10].Time.UnixNano() == 1642302327364384800 {
 			if len(results) != 3805 {
 				t.Errorf("results len = %d, want 3805", len(results))
 			}
@@ -91,8 +98,8 @@ func TestUnifiedLogIteratorBuildLog(t *testing.T) {
 			if results[10].Subsystem != "com.apple.lom" {
 				t.Errorf("subsystem = %q", results[10].Subsystem)
 			}
-			if results[10].Time != 1642302327364384800.0 {
-				t.Errorf("time = %f", results[10].Time)
+			if results[10].Time.UnixNano() != 1642302327364384800 {
+				t.Errorf("time = %v", results[10].Time.UnixNano())
 			}
 			if results[10].ActivityID != 0 {
 				t.Errorf("activity_id = %d", results[10].ActivityID)

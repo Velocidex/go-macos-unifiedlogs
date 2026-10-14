@@ -16,6 +16,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 const (
@@ -213,23 +214,27 @@ type ReadCursor struct {
 
 	fd     io.ReadSeekCloser
 	offset int64
+	Name   string
+
+	closer func()
 }
 
 func (self *ReadCursor) Read(buf []byte) (int, error) {
+	atomic.AddInt64(&gStats.CursorReads, 1)
+	if self.Reader.Buffered() < len(buf) {
+		atomic.AddInt64(&gStats.FileReads, 1)
+	}
 	n, err := io.ReadFull(self.Reader, buf)
 	if err == io.ErrUnexpectedEOF {
-		if n > 0 {
-			err = nil
-		} else {
+		if n == 0 {
 			return 0, io.EOF
 		}
+
+		// A short read with non zero length is not an error.
+		err = nil
 	}
 
 	self.offset += int64(n)
-	if err == io.EOF {
-		UlogsBreak()
-	}
-
 	return n, err
 }
 
@@ -290,8 +295,14 @@ func (self *ReadCursor) string(start, length uint64) (string, error) {
 		return "", err
 	}
 
-	self.offset = int64(start)
-	self.Reader.Reset(self.fd)
+	defer func() {
+		// Seek back to the previous position to keep bufio and fd in
+		// sync.
+		_, err := self.fd.Seek(self.offset, io.SeekStart)
+		if err != nil {
+			self.Reader.Reset(self.fd)
+		}
+	}()
 
 	// Read a buffer at the time until we hit a null termination.
 	buf := make([]byte, BUF_SIZE)
@@ -310,7 +321,7 @@ func (self *ReadCursor) string(start, length uint64) (string, error) {
 			return res.String(), nil
 		}
 
-		n, err := self.Read(buf[:to_read])
+		n, err := self.fd.Read(buf[:to_read])
 		if err != nil && err != io.EOF {
 			return res.String(), err
 		}
@@ -339,6 +350,7 @@ func (self *ReadCursor) Tell() int64 {
 }
 
 func (self *ReadCursor) Pos(pos int64) error {
+	atomic.AddInt64(&gStats.CursorSeeks, 1)
 	n, err := self.fd.Seek(pos, io.SeekStart)
 	self.offset = n
 	self.Reader.Reset(self.fd)
@@ -353,35 +365,35 @@ func (self *ReadCursor) bytes(start, length int64) ([]byte, error) {
 		length = MAX_STRING_LEN
 	}
 
+	if length < 0 {
+		return nil, nil
+	}
+
+	// We want to seek from the underlying fd but not invalidate the
+	// cache.
 	_, err := self.fd.Seek(start, io.SeekStart)
 	if err != nil {
-		if err == io.EOF {
-			UlogsBreak()
-		}
 		return nil, err
 	}
 
-	self.offset = start
-	self.Reader.Reset(self.fd)
-
-	if length < 0 || length > MAX_STRING_LEN {
-		return nil, ErrTooLarge
-	}
-
 	res := make([]byte, length)
-	n, err := self.Read(res)
+	n, err := self.fd.Read(res)
 	if err == io.EOF {
 		err = nil
 	}
+
+	// Seek back to the previous position to keep the bufio in sync
+	_, err = self.fd.Seek(self.offset, io.SeekStart)
+	if err != nil {
+		self.offset = start
+		self.Reader.Reset(self.fd)
+	}
+
 	return res[:n], err
 }
 
 func (self *ReadCursor) skip(n int) error {
 	_, err := self.take(n)
-	if err == io.EOF {
-		UlogsBreak()
-	}
-
 	return err
 }
 
@@ -399,12 +411,12 @@ func (self *ReadCursor) take(n int) ([]byte, error) {
 // first non-delim char.
 func (self *ReadCursor) read_bytes(delim byte) error {
 	for {
+		if self.Reader.Buffered() < BUF_SIZE {
+			atomic.AddInt64(&gStats.FileReads, 1)
+		}
 		buf, err := self.Reader.Peek(BUF_SIZE)
 		if err != nil && err != io.EOF {
 			return err
-		}
-		if err == io.EOF {
-			UlogsBreak()
 		}
 
 		for i := 0; i < len(buf); i++ {
@@ -424,23 +436,62 @@ func (self *ReadCursor) read_bytes(delim byte) error {
 
 func (self *ReadCursor) Close() {
 	self.fd.Close()
+	if self.closer != nil {
+		self.closer()
+	}
+
+	// Put the reader back in the pool
+	self.Reader.Reset(nil)
+	atomic.AddInt64(&gStats.BufioPut, 1)
+	readerPool.Put(self.Reader)
+	self.Reader = nil
 }
 
-func NewReadCursor(reader io.ReadSeekCloser) *ReadCursor {
-	return &ReadCursor{
-		Reader: bufio.NewReaderSize(reader, MEMORY_BUF_SIZE),
+// Pool bufio readers to avoid allocations.
+var readerPool = sync.Pool{
+	New: func() any {
+		// Return a pointer to a zero-value bytes.Reader
+		return bufio.NewReaderSize(nil, MEMORY_BUF_SIZE)
+	},
+}
+
+func NewReadCursor(reader io.ReadSeekCloser, opts ...CursorOptions) *ReadCursor {
+	// Borrow a reader from the pool
+	atomic.AddInt64(&gStats.BufioGet, 1)
+	br := readerPool.Get().(*bufio.Reader)
+	br.Reset(reader)
+
+	res := &ReadCursor{
+		Reader: br,
 		fd:     reader,
 	}
+	for _, opt := range opts {
+		if opt.Closer != nil {
+			res.closer = opt.Closer
+		}
+		if opt.Filename != "" {
+			res.Name = opt.Filename
+		}
+	}
+
+	return res
+}
+
+type CursorOptions struct {
+	Closer   func()
+	Filename string
 }
 
 type nopReadSeekCloser struct {
 	io.ReadSeeker
 }
 
-func (nopReadSeekCloser) Close() error {
+func (self nopReadSeekCloser) Close() error {
 	return nil
 }
 
-func NewReadCursorFromBuffer(buf []byte) *ReadCursor {
-	return NewReadCursor(nopReadSeekCloser{bytes.NewReader(buf)})
+func NewReadCursorFromBuffer(buf []byte, opts ...CursorOptions) *ReadCursor {
+	return NewReadCursor(nopReadSeekCloser{
+		bytes.NewReader(buf),
+	}, opts...)
 }

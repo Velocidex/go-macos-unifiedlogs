@@ -14,7 +14,7 @@ func TestDetectPreamble(t *testing.T) {
 		0, 16, 0, 0, 17, 0, 0, 0, 208, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
 	}
 	c := NewReadCursorFromBuffer(testPreambleHeader)
-	preambleData, err := detectPreamble(c)
+	preambleData, err := parsePreamble(c)
 	if err != nil {
 		t.Fatalf("detectPreamble returned error: %v", err)
 	}

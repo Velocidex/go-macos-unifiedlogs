@@ -10,6 +10,7 @@ package unifiedlogs
 import (
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestParseUnifiedLog(t *testing.T) {
@@ -99,7 +100,7 @@ func TestBuildLog(t *testing.T) {
 	if r.Subsystem != "com.apple.lom" {
 		t.Errorf("subsystem = %q", r.Subsystem)
 	}
-	if r.Time != 1642302326434850800.0 {
+	if r.Time.UnixNano() != 1642302326434850800 {
 		t.Errorf("time = %v", r.Time)
 	}
 	if r.ActivityID != 0 {
@@ -144,8 +145,8 @@ func TestBuildLog(t *testing.T) {
 	if r.RawMessage != "LOMD Start" {
 		t.Errorf("raw_message = %q", r.RawMessage)
 	}
-	if r.Timestamp != "2022-01-16T03:05:26.434850816Z" {
-		t.Errorf("timestamp = %q", r.Timestamp)
+	if r.Time.Format(time.RFC3339) != "2022-01-16T03:05:26.434850816Z" {
+		t.Errorf("timestamp = %q", r.Time.Format(time.RFC3339))
 	}
 }
 

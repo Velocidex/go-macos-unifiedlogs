@@ -6,11 +6,6 @@ import (
 	"io"
 
 	"github.com/alitto/pond/v2"
-	lru "github.com/hashicorp/golang-lru/v2"
-)
-
-const (
-	MAX_MEMORY_LARGE = 1000 * 1024 * 1024
 )
 
 func ReadAllWithLimit(fd io.Reader, limit int) ([]byte, error) {
@@ -27,20 +22,30 @@ type UnifiedLogParser struct {
 	provider          FileProvider
 	logger            *Logger
 	cache             StringCache
+	threads           int
 	message_formatter *MessageFormatter
+}
+
+type ParserOptions struct {
+	Threads int
 }
 
 func NewUnifiedLogParser(
 	provider FileProvider,
 	logger *Logger,
-	cache StringCache) *UnifiedLogParser {
+	cache StringCache, opts ...ParserOptions) *UnifiedLogParser {
 	res := &UnifiedLogParser{
 		provider:          provider,
 		logger:            logger,
 		cache:             cache,
+		threads:           5,
 		message_formatter: NewMessageFormatter(logger),
 	}
-	res.message_formatter.lru, _ = lru.New[string, []string](1000)
+	for _, opt := range opts {
+		if opt.Threads > 0 {
+			res.threads = opt.Threads
+		}
+	}
 	return res
 }
 
@@ -56,7 +61,9 @@ func (self *UnifiedLogParser) Parse(
 	go func() {
 		defer close(output_chan)
 
-		pool := pond.NewPool(20)
+		pool := pond.NewPool(self.threads,
+			pond.WithContext(ctx),
+			pond.WithQueueSize(2))
 		defer pool.StopAndWait()
 
 		for _, entry := range self.provider.Tracev3Files() {
@@ -65,19 +72,6 @@ func (self *UnifiedLogParser) Parse(
 				self.logger.Printf("%v", err)
 				continue
 			}
-
-			/*
-					data, err := ReadAllWithLimit(r, MAX_MEMORY_LARGE)
-					r.Close()
-					if err != nil {
-						self.logger.Printf("%v", err)
-						continue
-					}
-
-
-				fmt.Printf("File %v is %v\n",
-					entry.SourcePath(), len(data))
-			*/
 
 			it := &UnifiedLogIterator{
 				Reader:   r,

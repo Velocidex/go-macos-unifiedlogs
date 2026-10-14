@@ -87,9 +87,11 @@ type MessageFormatter struct {
 }
 
 func NewMessageFormatter(logger *Logger) *MessageFormatter {
+	lru_cache, _ := lru.New[string, []string](1000)
 	return &MessageFormatter{
 		logger:    logger,
 		messageRe: firehoseMessageRegex,
+		lru:       lru_cache,
 	}
 }
 

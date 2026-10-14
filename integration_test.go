@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Integration tests ported from the upstream tests/{big_sur,high_sierra,monterey,tahoe}_tests.rs
@@ -156,7 +157,7 @@ func TestBigSurLivedataIntegration(t *testing.T) {
 			if r.Process != "/kernel" {
 				t.Errorf("process = %q", r.Process)
 			}
-			if r.Time != 1642304801596413351.0 {
+			if r.Time.UnixNano() != 1642304801596413351 {
 				t.Errorf("time = %v", r.Time)
 			}
 			if r.BootUUID != "A2A9017676CF421C84DC9BBD6263FEE7" {
@@ -197,7 +198,7 @@ func TestBuildLogBigSurIntegration(t *testing.T) {
 	if r.Subsystem != "com.apple.opendirectoryd" {
 		t.Errorf("subsystem = %q", r.Subsystem)
 	}
-	if r.Time != 1642303933964503310.0 {
+	if r.Time.UnixNano() != 1642303933964503310 {
 		t.Errorf("time = %v", r.Time)
 	}
 	if r.ActivityID != 0 {
@@ -801,7 +802,7 @@ func TestBuildLogHighSierraIntegration(t *testing.T) {
 	if r.Subsystem != "com.apple.opendirectoryd" {
 		t.Errorf("subsystem = %q", r.Subsystem)
 	}
-	if r.Time != 1624134811546060433.0 {
+	if r.Time.UnixNano() != 1624134811546060433 {
 		t.Errorf("time = %v", r.Time)
 	}
 	if r.ActivityID != 0 {
@@ -873,7 +874,7 @@ func TestBuildLogComplexFormatHighSierraIntegration(t *testing.T) {
 			if r.Subsystem != "com.apple.PersistentConnection" {
 				t.Errorf("subsystem = %q", r.Subsystem)
 			}
-			if r.Time != 1624135094694359040.0 {
+			if r.Time.UnixNano() != 1624135094694359040 {
 				t.Errorf("time = %v", r.Time)
 			}
 			if r.ActivityID != 0 {
@@ -1128,7 +1129,7 @@ func TestBuildLogMontereyIntegration(t *testing.T) {
 	if r.Subsystem != "" {
 		t.Errorf("subsystem = %q, want empty", r.Subsystem)
 	}
-	if r.Time != 1651345928766719209.0 {
+	if r.Time.UnixNano() != 1651345928766719209 {
 		t.Errorf("time = %v", r.Time)
 	}
 	if r.ActivityID != 0 {
@@ -1346,7 +1347,7 @@ func TestBuildLogTahoeIntegration(t *testing.T) {
 	if r.Subsystem != "" {
 		t.Errorf("subsystem = %q, want empty", r.Subsystem)
 	}
-	if r.Time != 1.7766457650551785e18 {
+	if r.Time.UnixNano() != 177664576505517850 {
 		t.Errorf("time = %v", r.Time)
 	}
 	if r.ActivityID != 25562 {
@@ -1400,9 +1401,6 @@ func TestBuildLogTahoeIntegration(t *testing.T) {
 	if !strings.HasSuffix(r.Evidence, "000000000000000a.tracev3") {
 		t.Errorf("evidence = %q", r.Evidence)
 	}
-	if r.Timestamp != "2026-04-20T00:42:45.055178496Z" {
-		t.Errorf("timestamp = %q", r.Timestamp)
-	}
 
 	r45 := results[45]
 	if r45.Process != "/usr/libexec/opendirectoryd" {
@@ -1411,7 +1409,7 @@ func TestBuildLogTahoeIntegration(t *testing.T) {
 	if r45.Subsystem != "com.apple.CFBundle" {
 		t.Errorf("subsystem = %q", r45.Subsystem)
 	}
-	if r45.Time != 1.7766457511717076e18 {
+	if r45.Time.UnixNano() != 177664575117170760 {
 		t.Errorf("time = %v", r45.Time)
 	}
 	if r45.ActivityID != 192 {
@@ -1465,16 +1463,14 @@ func TestBuildLogTahoeIntegration(t *testing.T) {
 	if !strings.HasSuffix(r45.Evidence, "000000000000000a.tracev3") {
 		t.Errorf("evidence = %q", r45.Evidence)
 	}
-	if r45.Timestamp != "2026-04-20T00:42:31.171707648Z" {
-		t.Errorf("timestamp = %q", r45.Timestamp)
-	}
 
 	var midnight, stringCount, precisionCount, numberCount, privateNumberCount int
 	for _, entry := range results {
-		if !strings.Contains(entry.Timestamp, "2026-04-20T") {
-			t.Fatalf("timestamp = %q, want 2026-04-20T", entry.Timestamp)
+		if !strings.Contains(entry.Time.Format(time.RFC3339), "2026-04-20T") {
+			t.Fatalf("timestamp = %q, want 2026-04-20T",
+				entry.Time.Format(time.RFC3339))
 		}
-		if strings.Contains(entry.Timestamp, "2026-04-20T00:42") {
+		if strings.Contains(entry.Time.Format(time.RFC3339), "2026-04-20T00:42") {
 			midnight++
 		}
 		for _, value := range entry.MessageEntries {

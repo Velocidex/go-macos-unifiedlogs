@@ -7,6 +7,8 @@
 
 package unifiedlogs
 
+import "io"
+
 // UnifiedLogIterator iterates through the chunks in a tracev3 file. Each call
 // to Next returns the data (header, catalog(s), oversize) for one catalog
 // chunk, mirroring the Rust crate's UnifiedLogIterator.
@@ -28,40 +30,44 @@ func (u *UnifiedLogIterator) Next() (*UnifiedLogData, bool) {
 	logger := u.Logger
 
 	unifiedLogData := UnifiedLogData{
-		Header:   append([]HeaderChunk{}, u.Header...),
+		Header:   u.Header,
 		Evidence: u.Evidence,
 	}
 
-	// Keep a local copy of the catalog so we know when a new catalog chunk starts
+	// Keep a local copy of the catalog so we know when a new catalog
+	// chunk starts
 	var catalogData UnifiedLogCatalogData
-
-	offset := u.Reader.Tell()
-
-	const chunkPreambleSize = 16 // Include preamble size in total chunk size
-
-	const headerChunk = 0x1000
-	const catalogChunk = 0x600b
-	const chunksetChunk = 0x600d
 
 loop:
 	for {
-		preamble, err := detectPreamble(u.Reader)
+		offset := u.Reader.Tell()
+
+		preamble, err := parsePreamble(u.Reader)
 		if err != nil {
-			logger.Printf("Failed to determine preamble chunk")
+			// We already read the catalog, return what we have
+			if catalogData.Catalog.ChunkTag != 0 {
+				break
+			}
+
+			// We could not find a catalog but we still hit EOF. This
+			// could be the last chunk.
 			return nil, false
 		}
 		chunkSize := preamble.ChunkDataSize
 
 		if chunkSize > ^uint64(0)-chunkPreambleSize {
-			logger.Printf("Failed to nom chunk bytes")
+			logger.Debugf("Large chunkSize at header %v", chunkSize)
 			return nil, false
 		}
-
 		switch preamble.ChunkTag {
 		case headerChunk:
 			getHeaderData(u.Reader, preamble, &unifiedLogData, logger)
 
 		case catalogChunk:
+			// We already have a catalog - return what we have and
+			// rewind the cursor to the start of this catalog
+			// chunk. The next call to Next() will collect the catalog
+			// and the records after it.
 			if catalogData.Catalog.ChunkTag != 0 {
 				u.Reader.Pos(offset)
 				break loop
@@ -78,33 +84,16 @@ loop:
 		}
 
 		paddingSize := paddingSize8(preamble.ChunkDataSize)
-		_, err = nomBytes(u.Reader, paddingSize)
-		if err != nil {
-			logger.Printf("Failed to nom log end padding")
-			return nil, false
+		err = u.Reader.skip(int(paddingSize))
+		if err == io.EOF {
+			break
 		}
-		/*
-			if len(nextData) == 0 {
-				u.Data = nil
-				break
-			}
-			if len(nextData) == len(input) {
-				u.Data = nil
-				break
-			}
-
-			input = nextData
-			if len(input) < chunkPreambleSize {
-				logger.Printf("Not enough data for preamble header, needed 16 bytes. Got: %d", len(input))
-				u.Data = nil
-				break
-			}
-		*/
 	}
 
 	// Make sure to get the last catalog
 	if catalogData.Catalog.ChunkTag != 0 {
-		unifiedLogData.CatalogData = append(unifiedLogData.CatalogData, catalogData)
+		unifiedLogData.CatalogData = append(unifiedLogData.CatalogData,
+			catalogData)
 	}
 	u.Header = unifiedLogData.Header
 	return &unifiedLogData, true

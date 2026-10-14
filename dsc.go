@@ -9,7 +9,6 @@ package unifiedlogs
 
 import (
 	"fmt"
-	"io"
 	"math"
 )
 
@@ -99,14 +98,8 @@ func ParseDSC(
 
 	var uuidCount uint32
 	for uuidCount < sharedCacheStrings.NumberUUIDs {
-		if uuidCount == 1521 {
-			UlogsBreak()
-		}
 		uuidData, err := getUUIDs(c, dscMajor)
 		if err != nil {
-			if err == io.EOF {
-				UlogsBreak()
-			}
 			return nil, err
 		}
 		sharedCacheStrings.UUIDs = append(sharedCacheStrings.UUIDs, uuidData)

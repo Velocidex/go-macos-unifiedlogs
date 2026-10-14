@@ -5,6 +5,7 @@ go 1.26.0
 require howett.net/plist v1.0.1
 
 require (
+	github.com/alecthomas/assert/v2 v2.11.0
 	github.com/alecthomas/kingpin/v2 v2.4.0
 	github.com/alitto/pond/v2 v2.7.2
 	github.com/hashicorp/golang-lru/v2 v2.0.7
@@ -19,6 +20,7 @@ require (
 	github.com/alecthomas/participle/v2 v2.1.4 // indirect
 	github.com/alecthomas/repr v0.5.4 // indirect
 	github.com/alecthomas/units v0.0.0-20211218093645-b94a6e3cc137 // indirect
+	github.com/hexops/gotextdiff v1.0.3 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/rogpeppe/go-internal v1.16.0 // indirect

@@ -13,6 +13,8 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/Velocidex/go-macos-unifiedlogs/internal/sunlight"
 )
@@ -78,6 +80,7 @@ type UnifiedLogCatalogData struct {
 
 // LogData is a single parsed Unified Log entry.
 type LogData struct {
+	Time             time.Time          `json:"time"`
 	Subsystem        string             `json:"subsystem"`
 	ThreadID         uint64             `json:"thread_id"`
 	PID              uint64             `json:"pid"`
@@ -86,7 +89,6 @@ type LogData struct {
 	LibraryUUID      string             `json:"library_uuid"`
 	ActivityID       uint64             `json:"activity_id"`
 	ParentActivityID uint64             `json:"parent_activity_id"`
-	Time             float64            `json:"time"`
 	Category         string             `json:"category"`
 	EventType        EventType          `json:"event_type"`
 	LogType          LogType            `json:"log_type"`
@@ -96,8 +98,8 @@ type LogData struct {
 	RawMessage       string             `json:"raw_message"`
 	BootUUID         string             `json:"boot_uuid"`
 	TimezoneName     string             `json:"timezone_name"`
-	MessageEntries   []FirehoseItemType `json:"message_entries"`
-	Timestamp        string             `json:"timestamp"`
+	MessageEntries   []FirehoseItemType `json:"message_entries,omitempty"`
+	MessageStrings   []string           `json:"message_strings,omitempty"`
 	MessageFlags     []MessageFlags     `json:"message_flags"`
 	Evidence         string             `json:"evidence"`
 }
@@ -114,7 +116,7 @@ func parseUnifiedLog(
 
 	// Loop through traceV3 file until all file contents are read
 	for {
-		preamble, err := detectPreamble(c)
+		preamble, err := parsePreamble(c)
 		if err == io.EOF {
 			break
 
@@ -134,13 +136,6 @@ func parseUnifiedLog(
 			break
 		}
 
-		// Grab all data associated with Unified Log entry (chunk)
-		/*
-			chunkData, err := c.take(int(chunkSize + chunkPreambleSize))
-			if err != nil {
-				return nil, err
-			}
-		*/
 		switch preamble.ChunkTag {
 		case headerChunk:
 			getHeaderData(c, preamble, unifiedLogData, logger)
@@ -216,8 +211,7 @@ func (self *UnifiedLogParser) BuildLog(unifiedLogData *UnifiedLogData,
 					PID: catalogData.Catalog.GetPID(
 						preamble.FirstNumberProcID,
 						preamble.SecondNumberProcID, logger),
-					Time:      timestamp,
-					Timestamp: unixEpochToISO(int64(timestamp)),
+					Time:      time.Unix(0, timestamp).UTC(),
 					LogType:   getLogType(firehose.LogType, firehose.LogActivityType),
 					EventType: getEventType(firehose.LogActivityType),
 					EUID: catalogData.Catalog.GetEUID(
@@ -470,14 +464,14 @@ func (self *UnifiedLogParser) BuildLog(unifiedLogData *UnifiedLogData,
 				timezoneName = timezoneBase(unifiedLogData.Header[0].TimezonePath)
 			}
 
-			timestamp := getTimestamp(timesyncData, bootUUID, simpledump.ContinousTime, noFirehosePreamble)
+			timestamp := getTimestamp(timesyncData, bootUUID,
+				simpledump.ContinousTime, noFirehosePreamble)
 
 			logData := LogData{
 				Subsystem:    simpledump.Subsystem,
 				ThreadID:     simpledump.ThreadID,
 				PID:          simpledump.FirstProcID,
-				Time:         timestamp,
-				Timestamp:    unixEpochToISO(int64(timestamp)),
+				Time:         time.Unix(0, timestamp).UTC(),
 				LogType:      LogTypeSimpledump,
 				EventType:    EventTypeSimpledump,
 				Message:      simpledump.MessageString,
@@ -560,8 +554,7 @@ func (self *UnifiedLogParser) BuildLog(unifiedLogData *UnifiedLogData,
 			logData := LogData{
 				PID:        statedump.FirstProcID,
 				ActivityID: statedump.ActivityID,
-				Time:       timestamp,
-				Timestamp:  unixEpochToISO(int64(timestamp)),
+				Time:       time.Unix(0, timestamp).UTC(),
 				EventType:  EventTypeStatedump,
 				Message:    "title: " + statedump.TitleName + "\nObject Type: " + statedump.DecoderLibrary + "\nObject Type: " + statedump.DecoderType + "\n" + dataString,
 				LogType:    LogTypeStatedump,
@@ -691,9 +684,15 @@ func getChunksetLogData(
 		logger.Printf(" Failed to parse chunkset data: %v", err)
 		return
 	}
-	err = ParseChunksetData(
-		NewReadCursorFromBuffer(chunkset.DecompressedData),
-		catalogData, logger)
+
+	atomic.AddInt64(&gStats.DecompressedChunks, 1)
+	// Create a new buffer from the compressed data.
+	nc := NewReadCursorFromBuffer(chunkset.DecompressedData, CursorOptions{
+		Filename: c.Name + "(Compressed)",
+	})
+	defer nc.Close()
+
+	err = ParseChunksetData(nc, catalogData, logger)
 	if err != nil {
 		logger.Printf(" Failed to parse chunkset data: %v", err)
 		return
