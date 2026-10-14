@@ -69,7 +69,7 @@ func TestBadLogFile(t *testing.T) {
 	}
 }
 
-func TestBuildLog(t *testing.T) {
+func TestBuildLog1(t *testing.T) {
 	archive := requireTestDataFile(t, "system_logs_big_sur.logarchive")
 	provider := NewLogarchiveProvider(archive)
 	cache := NewMemoryStringCache()
@@ -100,7 +100,7 @@ func TestBuildLog(t *testing.T) {
 	if r.Subsystem != "com.apple.lom" {
 		t.Errorf("subsystem = %q", r.Subsystem)
 	}
-	if r.Time.UnixNano() != 1642302326434850800 {
+	if r.Time.UnixNano() != 1642302326434850732 {
 		t.Errorf("time = %v", r.Time)
 	}
 	if r.ActivityID != 0 {
@@ -145,7 +145,7 @@ func TestBuildLog(t *testing.T) {
 	if r.RawMessage != "LOMD Start" {
 		t.Errorf("raw_message = %q", r.RawMessage)
 	}
-	if r.Time.Format(time.RFC3339) != "2022-01-16T03:05:26.434850816Z" {
+	if r.Time.Format(time.RFC3339) != "2022-01-16T03:05:26Z" {
 		t.Errorf("timestamp = %q", r.Time.Format(time.RFC3339))
 	}
 }

@@ -322,8 +322,16 @@ func (self *ReadCursor) string(start, length uint64) (string, error) {
 		}
 
 		n, err := self.fd.Read(buf[:to_read])
-		if err != nil && err != io.EOF {
-			return res.String(), err
+		if err != nil {
+			if err == io.EOF {
+				if n == 0 {
+					return "", io.EOF
+				}
+				err = nil
+
+			} else {
+				return "", err
+			}
 		}
 
 		// Search for null termination.

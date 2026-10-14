@@ -874,8 +874,8 @@ func TestBuildLogComplexFormatHighSierraIntegration(t *testing.T) {
 			if r.Subsystem != "com.apple.PersistentConnection" {
 				t.Errorf("subsystem = %q", r.Subsystem)
 			}
-			if r.Time.UnixNano() != 1624135094694359040 {
-				t.Errorf("time = %v", r.Time)
+			if r.Time.UnixNano() != 1624135094694358974 {
+				t.Errorf("time = %v", r.Time.UnixNano())
 			}
 			if r.ActivityID != 0 {
 				t.Errorf("activity_id = %d, want 0", r.ActivityID)
@@ -1347,7 +1347,7 @@ func TestBuildLogTahoeIntegration(t *testing.T) {
 	if r.Subsystem != "" {
 		t.Errorf("subsystem = %q, want empty", r.Subsystem)
 	}
-	if r.Time.UnixNano() != 177664576505517850 {
+	if r.Time.UnixNano() != 1776645765055178542 {
 		t.Errorf("time = %v", r.Time)
 	}
 	if r.ActivityID != 25562 {
@@ -1409,8 +1409,8 @@ func TestBuildLogTahoeIntegration(t *testing.T) {
 	if r45.Subsystem != "com.apple.CFBundle" {
 		t.Errorf("subsystem = %q", r45.Subsystem)
 	}
-	if r45.Time.UnixNano() != 177664575117170760 {
-		t.Errorf("time = %v", r45.Time)
+	if r45.Time.UnixNano() != 1776645751171707583 {
+		t.Errorf("time = %v", r45.Time.UnixNano())
 	}
 	if r45.ActivityID != 192 {
 		t.Errorf("activity_id = %d, want 192", r45.ActivityID)

@@ -13,6 +13,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/alecthomas/assert/v2"
 )
 
 func TestParseStatedump(t *testing.T) {
@@ -38,8 +40,11 @@ func TestParseStatedump(t *testing.T) {
 		2, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0,
 	}
 	logger := NewLogger()
-	results, err := ParseStatedump(
-		statedumpTestdata, &LogPreamble{ChunkTag: statedumpChunk}, logger)
+	c := NewReadCursorFromBuffer(statedumpTestdata)
+	preamble, err := parsePreamble(c)
+	assert.NoError(t, err)
+
+	results, err := ParseStatedump(statedumpTestdata[chunkPreambleSize:], preamble, logger)
 	if err != nil {
 		t.Fatalf("ParseStatedump failed: %v", err)
 	}
@@ -594,8 +599,12 @@ func TestParseStatedumpPlist(t *testing.T) {
 		0, 26, 219,
 	}
 	logger := NewLogger()
-	results, err := ParseStatedump(statedumpPlistTestData,
-		&LogPreamble{ChunkTag: statedumpChunk}, logger)
+	c := NewReadCursorFromBuffer(statedumpPlistTestData)
+	preamble, err := parsePreamble(c)
+	assert.NoError(t, err)
+
+	results, err := ParseStatedump(
+		statedumpPlistTestData[chunkPreambleSize:], preamble, logger)
 	if err != nil {
 		t.Fatalf("ParseStatedump failed: %v", err)
 	}

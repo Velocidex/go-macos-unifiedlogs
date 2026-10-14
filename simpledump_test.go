@@ -7,7 +7,11 @@
 
 package unifiedlogs
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/alecthomas/assert/v2"
+)
 
 func TestParseSimpledump(t *testing.T) {
 	testData := []byte{
@@ -33,8 +37,11 @@ func TestParseSimpledump(t *testing.T) {
 		105, 116, 32, 61, 32, 49, 0, 0, 0, 0, 0, 0,
 	}
 	logger := NewLogger()
-	results, err := parseSimpledump(
-		testData, &LogPreamble{ChunkTag: simpledumpChunk}, logger)
+	c := NewReadCursorFromBuffer(testData)
+	preamble, err := parsePreamble(c)
+	assert.NoError(t, err)
+
+	results, err := parseSimpledump(testData[chunkPreambleSize:], preamble, logger)
 	if err != nil {
 		t.Fatalf("parseSimpledump returned error: %v", err)
 	}

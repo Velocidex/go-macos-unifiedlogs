@@ -132,7 +132,12 @@ func parseNonActivity(
 
 // getFirehoseNonactivityStrings gets the base log message string formatter from shared cache
 // strings (dsc) or the UUID text file for firehose non-activity log entries.
-func getFirehoseNonactivityStrings(firehose *FirehoseNonActivity, provider FileProvider, cache StringCache, stringOffset uint64, firstProcID uint64, secondProcID uint32, catalogs *CatalogChunk) ([]byte, MessageData, error) {
+func getFirehoseNonactivityStrings(
+	firehose *FirehoseNonActivity,
+	provider FileProvider,
+	cache StringCache, stringOffset uint64,
+	firstProcID uint64, secondProcID uint32,
+	catalogs *CatalogChunk) ([]byte, MessageData, error) {
 	params := MessageParams{
 		PCID:                firehose.PCID,
 		StringOffset:        stringOffset,

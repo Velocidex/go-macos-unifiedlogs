@@ -10,7 +10,6 @@ package unifiedlogs
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -116,13 +115,10 @@ func parseUnifiedLog(
 
 	// Loop through traceV3 file until all file contents are read
 	for {
-		preamble, err := parsePreamble(c)
-		if err == io.EOF {
-			break
+		offset := uint64(c.Tell())
 
-		} else if err != nil {
-			// Return as much data as we can when we hit an error.
-			logger.Printf("While parsing %v: %v", evidence, err)
+		preamble, err := parsePreamble(c)
+		if err != nil {
 			break
 		}
 
@@ -133,7 +129,7 @@ func parseUnifiedLog(
 			// Return as much data as we can when we hit an error.
 			logger.Printf("While parsing %v: chunkSize too large %v",
 				evidence, chunkSize)
-			break
+			return nil, ErrTooLarge
 		}
 
 		switch preamble.ChunkTag {
@@ -155,8 +151,21 @@ func parseUnifiedLog(
 			logger.Printf(" Unknown chunk type: %v", preamble.ChunkTag)
 		}
 
+		// Skip to the next chunk
 		paddingSize := paddingSize8(preamble.ChunkDataSize)
-		c.skip(int(paddingSize))
+		next_offset := paddingSize + offset + preamble.ChunkDataSize + chunkPreambleSize
+		current_offset := uint64(c.Tell())
+
+		// Should not really happen - we can not really go backwards.
+		if current_offset > next_offset {
+			c.Pos(int64(next_offset))
+			break
+		} else if next_offset > current_offset {
+			err = c.skip(int(next_offset - current_offset))
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	// Make sure to get the last catalog

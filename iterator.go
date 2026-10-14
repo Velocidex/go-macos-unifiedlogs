@@ -7,8 +7,6 @@
 
 package unifiedlogs
 
-import "io"
-
 // UnifiedLogIterator iterates through the chunks in a tracev3 file. Each call
 // to Next returns the data (header, catalog(s), oversize) for one catalog
 // chunk, mirroring the Rust crate's UnifiedLogIterator.
@@ -80,13 +78,24 @@ loop:
 				&unifiedLogData, logger)
 
 		default:
+			// Skip the chunk and ignore it
+			u.Reader.skip(int(preamble.ChunkDataSize))
 			logger.Printf(" Unknown chunk type: %v", preamble.ChunkTag)
 		}
 
 		paddingSize := paddingSize8(preamble.ChunkDataSize)
-		err = u.Reader.skip(int(paddingSize))
-		if err == io.EOF {
+		next_offset := paddingSize + uint64(offset) + preamble.ChunkDataSize + chunkPreambleSize
+		current_offset := uint64(u.Reader.Tell())
+
+		// Should not really happen - we can not really go backwards.
+		if current_offset > next_offset {
+			u.Reader.Pos(int64(next_offset))
 			break
+		} else if next_offset > current_offset {
+			err = u.Reader.skip(int(next_offset - current_offset))
+			if err != nil {
+				return nil, false
+			}
 		}
 	}
 

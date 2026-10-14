@@ -206,7 +206,9 @@ func parseTimesync(
 // get the nanosecond representation.
 //
 // Add results to timesync_walltime (unix epoch in nanoseconds).
-// Final results is unix epoch timestamp in nanoseconds.
+// Final results is unix epoch timestamp in nanoseconds.  Note:
+// Original code used floats but this leads to loss of precision -
+// changed to use int64
 func getTimestamp(timesyncData map[string]*TimesyncBoot,
 	bootUUID string,
 	firehoseLogDeltaTime, firehosePreambleTime uint64) int64 {

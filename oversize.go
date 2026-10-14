@@ -105,7 +105,8 @@ func parseOversize(
 
 	const emptyFlags uint16 = 0
 	// Grab all message items from oversize data
-	oversizePrivateData, firehoseItemData, err := collectFirehoseItems(messageData, oversizeItemCount, emptyFlags, logger)
+	oversizePrivateData, firehoseItemData, err := collectFirehoseItems(
+		messageData, oversizeItemCount, emptyFlags, logger)
 	if err != nil {
 		return oversizeResults, err
 	}

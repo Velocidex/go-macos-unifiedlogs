@@ -22,10 +22,6 @@ func TestUnifiedLogIterator(t *testing.T) {
 	var chunks []*UnifiedLogData
 	total := 0
 	for {
-		if len(chunks) == 55 {
-			UlogsBreak()
-		}
-
 		chunk, ok := it.Next()
 		if !ok {
 			break

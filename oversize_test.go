@@ -10,6 +10,8 @@ package unifiedlogs
 import (
 	"os"
 	"testing"
+
+	"github.com/alecthomas/assert/v2"
 )
 
 func TestParseOversize(t *testing.T) {
@@ -298,8 +300,12 @@ func TestParseOversize(t *testing.T) {
 	}
 
 	logger := NewLogger()
-	const oversizeChunk uint32 = 0x6002
-	results, err := parseOversize(testData, &LogPreamble{ChunkTag: oversizeChunk}, logger)
+	c := NewReadCursorFromBuffer(testData)
+	preamble, err := parsePreamble(c)
+	assert.NoError(t, err)
+
+	results, err := parseOversize(testData[chunkPreambleSize:],
+		preamble, logger)
 	if err != nil {
 		t.Fatalf("parseOversize returned error: %v", err)
 	}
@@ -404,7 +410,11 @@ func TestParseOversizePrivateStrings(t *testing.T) {
 		t.Fatalf("read failed: %v", err)
 	}
 	logger := NewLogger()
-	results, err := parseOversize(buffer, &LogPreamble{ChunkTag: oversizeChunk}, logger)
+	c := NewReadCursorFromBuffer(buffer)
+	preamble, err := parsePreamble(c)
+	assert.NoError(t, err)
+
+	results, err := parseOversize(buffer[chunkPreambleSize:], preamble, logger)
 	if err != nil {
 		t.Fatalf("parseOversize returned error: %v", err)
 	}
