@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 type formatAndMessage struct {
@@ -77,11 +79,41 @@ type messageFormatters struct {
 	padding padding
 }
 
+type MessageFormatter struct {
+	logger    *Logger
+	messageRe *regexp.Regexp
+
+	lru *lru.Cache[string, []string]
+}
+
+func NewMessageFormatter(logger *Logger) *MessageFormatter {
+	lru_cache, _ := lru.New[string, []string](1000)
+	return &MessageFormatter{
+		logger:    logger,
+		messageRe: firehoseMessageRegex,
+		lru:       lru_cache,
+	}
+}
+
+// Memoize the regex because it is extremely slow.
+func (self *MessageFormatter) FindAllString(logMessage string) []string {
+	res, ok := self.lru.Get(logMessage)
+	if ok {
+		return res
+	}
+
+	res = self.messageRe.FindAllString(logMessage, -1)
+	self.lru.Add(logMessage, res)
+	return res
+}
+
 // FormatFirehoseLogMessage formats the Unified Log message entry based on the parsed log items.
 // Formatting follows the C lang printf formatting process.
-func FormatFirehoseLogMessage(formatString string, itemMessage []FirehoseItemType, messageRe *regexp.Regexp) string {
+func (self *MessageFormatter) FormatFirehoseLogMessage(
+	formatString string,
+	itemMessage []FirehoseItemType) string {
+
 	logMessage := formatString
-	famVec := []formatAndMessage{}
 
 	// Some log entries may be completely empty (no format string or message data)
 	if logMessage == "" && len(itemMessage) == 0 {
@@ -91,7 +123,8 @@ func FormatFirehoseLogMessage(formatString string, itemMessage []FirehoseItemTyp
 		return itemMessage[0].MessageStrings
 	}
 
-	results := messageRe.FindAllString(logMessage, -1)
+	results := self.FindAllString(logMessage)
+	famVec := make([]formatAndMessage, 0, len(results))
 
 	itemIndex := 0
 	for _, formatter := range results {
@@ -163,9 +196,12 @@ func FormatFirehoseLogMessage(formatString string, itemMessage []FirehoseItemTyp
 					itemMessage[itemIndex].ItemSize == privateMessage) {
 				formattedLogMessage = "<private>"
 			} else {
-				formatted, err := parseTypeFormatter(formatterString, itemMessage, itemMessage[itemIndex].ItemType, itemIndex)
+				formatted, err := parseTypeFormatter(
+					formatterString, itemMessage,
+					itemMessage[itemIndex].ItemType,
+					itemIndex, self.logger)
 				if err != nil {
-					logger.Printf("[macos-unifiedlogs] Failed to format message type ex: public/private: %v", err)
+					self.logger.Printf(" Failed to format message type ex: public/private: %v", err)
 				} else {
 					formattedLogMessage = formatted
 				}
@@ -180,9 +216,12 @@ func FormatFirehoseLogMessage(formatString string, itemMessage []FirehoseItemTyp
 					itemMessage[itemIndex].ItemSize == privateMessage) {
 				formattedLogMessage = "<private>"
 			} else {
-				formatted, err := parseFormatter(formatterString, itemMessage, itemMessage[itemIndex].ItemType, itemIndex)
+				formatted, err := parseFormatter(
+					formatterString, itemMessage,
+					itemMessage[itemIndex].ItemType,
+					itemIndex, self.logger)
 				if err != nil {
-					logger.Printf("[macos-unifiedlogs] Failed to format message: %v", err)
+					self.logger.Printf(" Failed to format message: %v", err)
 				} else {
 					formattedLogMessage = formatted
 				}
@@ -195,7 +234,7 @@ func FormatFirehoseLogMessage(formatString string, itemMessage []FirehoseItemTyp
 		famVec = append(famVec, formatAndMessage)
 	}
 
-	logMessageVec := []string{}
+	logMessageVec := make([]string, 0, len(famVec))
 	for _, values := range famVec {
 		// Split the values by printf formatter
 		// We have to do this instead of using replace because our replacement string may also
@@ -208,7 +247,7 @@ func FormatFirehoseLogMessage(formatString string, itemMessage []FirehoseItemTyp
 			logMessageVec = append(logMessageVec, values.message)
 			logMessage = remainingMessage
 		} else {
-			logger.Printf("Failed to split log message (%s) by printf formatter: %s", logMessage, values.formatter)
+			self.logger.Printf("Failed to split log message (%s) by printf formatter: %s", logMessage, values.formatter)
 		}
 	}
 	logMessageVec = append(logMessageVec, logMessage)
@@ -217,7 +256,10 @@ func FormatFirehoseLogMessage(formatString string, itemMessage []FirehoseItemTyp
 
 // parseFormatter formats strings based on C printf formats. Parse format specification.
 // parse_formatter in the Rust source.
-func parseFormatter(formatter string, messageValue []FirehoseItemType, itemType uint8, itemIndex int) (string, error) {
+func parseFormatter(formatter string,
+	messageValue []FirehoseItemType,
+	itemType uint8, itemIndex int,
+	logger *Logger) (string, error) {
 	index := itemIndex
 	message := ""
 
@@ -235,7 +277,7 @@ func parseFormatter(formatter string, messageValue []FirehoseItemType, itemType 
 		index++
 
 		if index >= len(messageValue) {
-			logger.Printf("[macos-unifiedlogs] Index now greater than messages array. This should not have happened. Index: %d. Message Array len: %d", index, len(messageValue))
+			logger.Printf(" Index now greater than messages array. This should not have happened. Index: %d. Message Array len: %d", index, len(messageValue))
 			return "Failed to format string due index length", nil
 		}
 	}
@@ -252,7 +294,7 @@ func parseFormatter(formatter string, messageValue []FirehoseItemType, itemType 
 		slices.Contains(numberItemType, messageValue[index].ItemType) {
 		charResults, err := strconv.ParseUint(messageValue[index].MessageStrings, 10, 32)
 		if err != nil {
-			logger.Printf("[macos-unifiedlogs] Failed to parse number item to char string: %v", err)
+			logger.Printf(" Failed to parse number item to char string: %v", err)
 			return "Failed to parse number item to char string", nil
 		}
 		message = string(rune(uint8(charResults)))
@@ -299,7 +341,7 @@ loop:
 			precisionValue = int(messageValue[index].ItemSize)
 			index++
 			if index >= len(messageValue) {
-				logger.Printf("[macos-unifiedlogs] Index now greater than messages array. This should not have happened. Index: %d. Message Array len: %d", index, len(messageValue))
+				logger.Printf(" Index now greater than messages array. This should not have happened. Index: %d. Message Array len: %d", index, len(messageValue))
 				return "Failed to format precision/dynamic string due index length", nil
 			}
 			message = messageValue[index].MessageStrings
@@ -328,7 +370,7 @@ loop:
 				if err == nil {
 					precisionValue = precisionResults
 				} else {
-					logger.Printf("[macos-unifiedlogs] Failed to parse format precision value: %v", err)
+					logger.Printf(" Failed to parse format precision value: %v", err)
 				}
 			} else if precisionValue != 0 {
 				// For dynamic length use the length of the message string
@@ -385,28 +427,31 @@ loop:
 		numberFormat: numberFormatNone,
 		padding:      pad,
 	}
-	determineMessageItem(&messageData)
+	determineMessageItem(&messageData, logger)
 
 	if width != "" {
 		widthResults, err := strconv.Atoi(width)
 		if err == nil {
 			messageData.width = widthResults
 		} else {
-			logger.Printf("[macos-unifiedlogs] Failed to parse format width value: %v", err)
+			logger.Printf(" Failed to parse format width value: %v", err)
 		}
 
-		formatMessagePadding(&messageData)
+		formatMessagePadding(&messageData, logger)
 		return messageData.message, nil
 	}
 
-	formatMessage(&messageData)
+	formatMessage(&messageData, logger)
 	return messageData.message, nil
 }
 
 // parseTypeFormatter parses formatters containing types.
 // Ex: %{errno}d, %{public}s, %{private}s, %{sensitive}
 // parse_type_formatter in the Rust source.
-func parseTypeFormatter(formatter string, messageValue []FirehoseItemType, itemType uint8, itemIndex int) (string, error) {
+func parseTypeFormatter(
+	formatter string, messageValue []FirehoseItemType,
+	itemType uint8, itemIndex int,
+	logger *Logger) (string, error) {
 	idx := strings.Index(formatter, "}")
 	if idx < 0 {
 		return "", ErrFail
@@ -416,7 +461,8 @@ func parseTypeFormatter(formatter string, messageValue []FirehoseItemType, itemT
 	format := formatter[idx:]
 	formatType := formatter[:idx]
 
-	appleObject := checkObjects(formatType, messageValue, itemType, itemIndex)
+	appleObject := checkObjects(
+		formatType, messageValue, itemType, itemIndex, logger)
 
 	// If we successfully decoded an apple object, then there is nothing to format.
 	// Signpost entries have not been seen with custom objects
@@ -424,7 +470,8 @@ func parseTypeFormatter(formatter string, messageValue []FirehoseItemType, itemT
 		return appleObject, nil
 	}
 
-	message, err := parseFormatter(format, messageValue, itemType, itemIndex)
+	message, err := parseFormatter(
+		format, messageValue, itemType, itemIndex, logger)
 	if err != nil {
 		return "", err
 	}
@@ -463,21 +510,22 @@ func parseSignpostFormat(signpostFormat string) string {
 }
 
 // determineMessageItem determines how the message item should be formatted.
-func determineMessageItem(message *messageFormatters) {
+func determineMessageItem(
+	message *messageFormatters, logger *Logger) {
 	switch {
 	case slices.Contains(floatTypes, message.itemFormat):
-		v := parseFloat(message.message)
+		v := parseFloat(message.message, logger)
 		message.itemFloat = &v
 	case slices.Contains(intTypes, message.itemFormat):
-		v := parseInt(message.message)
+		v := parseInt(message.message, logger)
 		message.itemNumber = &v
 		message.numberFormat = numberFormatDecimal
 	case slices.Contains(octalTypes, message.itemFormat):
-		v := parseInt(message.message)
+		v := parseInt(message.message, logger)
 		message.itemNumber = &v
 		message.numberFormat = numberFormatOctal
 	case slices.Contains(hexTypes, message.itemFormat):
-		v := parseInt(message.message)
+		v := parseInt(message.message, logger)
 		message.itemNumber = &v
 		message.numberFormat = numberFormatHex
 	case slices.Contains(stringTypes, message.itemFormat):
@@ -487,7 +535,8 @@ func determineMessageItem(message *messageFormatters) {
 }
 
 // formatMessage formats the event message with no padding.
-func formatMessage(message *messageFormatters) {
+func formatMessage(
+	message *messageFormatters, logger *Logger) {
 	precisionValue := 0
 	plusOption := ""
 
@@ -510,7 +559,7 @@ func formatMessage(message *messageFormatters) {
 		}
 		message.message = plusOption + strconv.FormatFloat(item, 'f', precisionValue, 64)
 	case message.itemNumber != nil:
-		message.message = plusOption + formatNumber(*message.itemNumber, message.numberFormat, message.hashtag)
+		message.message = plusOption + formatNumber(*message.itemNumber, message.numberFormat, message.hashtag, logger)
 	case message.itemString != nil:
 		item := *message.itemString
 		if precisionValue == 0 {
@@ -523,7 +572,8 @@ func formatMessage(message *messageFormatters) {
 // formatMessagePadding formats the event message using zeros or spaces as padding. All messages
 // have alignment to left or right with padding if needed. Message values can also have width and
 // precision requirements.
-func formatMessagePadding(message *messageFormatters) {
+func formatMessagePadding(
+	message *messageFormatters, logger *Logger) {
 	precisionValue := 0
 	plusOption := ""
 	adjustWidth := 0
@@ -560,7 +610,10 @@ func formatMessagePadding(message *messageFormatters) {
 		value := strconv.FormatFloat(item, 'f', precisionValue, 64)
 		message.message = plusOption + padRunes(value, width, fill, left)
 	case message.itemNumber != nil:
-		value := formatNumber(*message.itemNumber, message.numberFormat, message.hashtag)
+		value := formatNumber(
+			*message.itemNumber,
+			message.numberFormat,
+			message.hashtag, logger)
 		message.message = plusOption + padRunes(value, width, fill, left)
 	case message.itemString != nil:
 		item := *message.itemString
@@ -573,26 +626,30 @@ func formatMessagePadding(message *messageFormatters) {
 }
 
 // parseFloat parses the float string log message to float value.
-func parseFloat(message string) float64 {
+func parseFloat(
+	message string, logger *Logger) float64 {
 	byteResults, err := strconv.ParseInt(message, 10, 64)
 	if err == nil {
 		return math.Float64frombits(uint64(byteResults))
 	}
-	logger.Printf("[macos-unifiedlogs] Failed to parse float log message value: %s, err: %v. Log message possibly incorrectly formatted ex: printf(%%u, \"message\") instead of printf(%%u, 10). Apple may record message as '<decode: mismatch for [%%u] got [STRING sz:10]>'", message, err)
+	logger.Printf(" Failed to parse float log message value: %s, err: %v. Log message possibly incorrectly formatted ex: printf(%%u, \"message\") instead of printf(%%u, 10). Apple may record message as '<decode: mismatch for [%%u] got [STRING sz:10]>'", message, err)
 	return math.Float64frombits(0)
 }
 
 // parseInt parses the int string log message to int value.
-func parseInt(message string) int64 {
+func parseInt(
+	message string, logger *Logger) int64 {
 	intResults, err := strconv.ParseInt(message, 10, 64)
 	if err == nil {
 		return intResults
 	}
-	logger.Printf("[macos-unifiedlogs] Failed to parse int log message value: %s, err: %v. Log message possibly incorrectly formatted ex: printf(%%u, \"message\") instead of printf(%%u, 10). Apple may record message as '<decode: mismatch for [%%u] got [STRING sz:10]>'", message, err)
+	logger.Printf(" Failed to parse int log message value: %s, err: %v. Log message possibly incorrectly formatted ex: printf(%%u, \"message\") instead of printf(%%u, 10). Apple may record message as '<decode: mismatch for [%%u] got [STRING sz:10]>'", message, err)
 	return 0
 }
 
-func formatNumber(n int64, nf numberFormat, hashtag bool) string {
+func formatNumber(
+	n int64, nf numberFormat,
+	hashtag bool, logger *Logger) string {
 	switch nf {
 	case numberFormatOctal:
 		value := strconv.FormatInt(n, 8)
@@ -609,7 +666,7 @@ func formatNumber(n int64, nf numberFormat, hashtag bool) string {
 	case numberFormatDecimal:
 		return strconv.FormatInt(n, 10)
 	default:
-		logger.Printf("[macos-unifiedlogs] Got NumberFormat None for %v", nf)
+		logger.Printf(" Got NumberFormat None for %v", nf)
 		return ""
 	}
 }

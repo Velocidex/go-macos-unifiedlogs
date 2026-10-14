@@ -55,7 +55,9 @@ func u64ToUint(n uint64) (int, bool) {
 
 // extractStringSize extracts a size based on the provided string size from
 // Firehose string item entries.
-func extractStringSize(data []byte, messageSize uint64) ([]byte, string, error) {
+func extractStringSize(
+	data []byte,
+	messageSize uint64, logger *Logger) ([]byte, string, error) {
 	const nullString uint64 = 0
 	if messageSize == nullString {
 		return data, "(null)", nil
@@ -69,13 +71,13 @@ func extractStringSize(data []byte, messageSize uint64) ([]byte, string, error) 
 		if utf8.Valid(path) {
 			return []byte{}, strings.TrimRight(string(path), "\x00"), nil
 		}
-		logger.Printf("[macos-unifiedlogs] Failed to get extract specific string size: invalid UTF-8")
+		logger.Printf(" Failed to get extract specific string size: invalid UTF-8")
 	}
 
 	// Get whole string message except end of string (0s)
 	messageSizeInt, ok := u64ToUint(messageSize)
 	if !ok {
-		logger.Printf("[macos-unifiedlogs] u64 is bigger than system usize")
+		logger.Printf(" u64 is bigger than system usize")
 		return nil, "", fmt.Errorf("string size %d too large: %w", messageSize, ErrEof)
 	}
 	if len(data) < messageSizeInt {
@@ -85,7 +87,7 @@ func extractStringSize(data []byte, messageSize uint64) ([]byte, string, error) 
 	if utf8.Valid(path) {
 		return data[messageSizeInt:], strings.TrimRight(string(path), "\x00"), nil
 	}
-	logger.Printf("[macos-unifiedlogs] Failed to get specific string: invalid UTF-8")
+	logger.Printf(" Failed to get specific string: invalid UTF-8")
 
 	return data[messageSizeInt:], "[macos-unifiedlogs Could not extract string", nil
 }
@@ -110,9 +112,9 @@ func nonEmptyCString(c *cursor) (string, error) {
 }
 
 // extractString extracts strings that contain end of string characters.
-func extractString(data []byte) ([]byte, string, error) {
+func extractString(data []byte, logger *Logger) ([]byte, string, error) {
 	if len(data) == 0 {
-		logger.Printf("[macos-unifiedlogs] Cannot extract string. Empty input.")
+		logger.Printf(" Cannot extract string. Empty input.")
 		return data, "Cannot extract string. Empty input.", nil
 	}
 
@@ -122,7 +124,7 @@ func extractString(data []byte) ([]byte, string, error) {
 		if utf8.Valid(data) {
 			return []byte{}, string(data), nil
 		}
-		logger.Printf("[macos-unifiedlogs] Failed to extract full string: invalid UTF-8")
+		logger.Printf(" Failed to extract full string: invalid UTF-8")
 		return []byte{}, "Could not extract string", nil
 	}
 
@@ -131,7 +133,7 @@ func extractString(data []byte) ([]byte, string, error) {
 	if utf8.Valid(path) {
 		return c.rest(), string(path), nil
 	}
-	logger.Printf("[macos-unifiedlogs] Failed to get string: invalid UTF-8")
+	logger.Printf(" Failed to get string: invalid UTF-8")
 	return c.rest(), "Could not extract string", nil
 }
 
@@ -150,4 +152,12 @@ func decodeStandard(data string) ([]byte, error) {
 func unixEpochToISO(timestamp int64) string {
 	t := time.Unix(0, timestamp).UTC()
 	return t.Format("2006-01-02T15:04:05.000000000Z")
+}
+
+func convertToStrings(in []MessageFlags) (res []string) {
+	res = make([]string, 0, len(in))
+	for _, f := range in {
+		res = append(res, string(f))
+	}
+	return res
 }

@@ -14,7 +14,8 @@ func TestCheckObjectsLowercaseBool(t *testing.T) {
 	testItemInfo := []FirehoseItemType{
 		{MessageStrings: "1", ItemType: 0, ItemSize: 4},
 	}
-	results := checkObjects(testFormat, testItemInfo, 0, 0)
+	logger := NewLogger()
+	results := checkObjects(testFormat, testItemInfo, 0, 0, logger)
 	if results != "true" {
 		t.Errorf("checkObjects = %q, want true", results)
 	}
@@ -25,7 +26,8 @@ func TestCheckObjectsUppercaseBool(t *testing.T) {
 	testItemInfo := []FirehoseItemType{
 		{MessageStrings: "1", ItemType: 0, ItemSize: 4},
 	}
-	results := checkObjects(testFormat, testItemInfo, 0, 0)
+	logger := NewLogger()
+	results := checkObjects(testFormat, testItemInfo, 0, 0, logger)
 	if results != "YES" {
 		t.Errorf("checkObjects = %q, want YES", results)
 	}
@@ -36,7 +38,8 @@ func TestCheckObjectsOdtypes(t *testing.T) {
 	testItemInfo := []FirehoseItemType{
 		{MessageStrings: "I/7///8vTG9jYWwvRGVmYXVsdAA=", ItemType: 50, ItemSize: 0},
 	}
-	results := checkObjects(testFormat, testItemInfo, 50, 0)
+	logger := NewLogger()
+	results := checkObjects(testFormat, testItemInfo, 50, 0, logger)
 	if results != "user: -2@/Local/Default" {
 		t.Errorf("checkObjects = %q, want user: -2@/Local/Default", results)
 	}
@@ -47,7 +50,8 @@ func TestCheckObjectsUuid(t *testing.T) {
 	testItemInfo := []FirehoseItemType{
 		{MessageStrings: "hZV+HTbETtKGqAZXvN3ikw==", ItemType: 50, ItemSize: 16},
 	}
-	results := checkObjects(testFormat, testItemInfo, 50, 0)
+	logger := NewLogger()
+	results := checkObjects(testFormat, testItemInfo, 50, 0, logger)
 	if results != "85957E1D36C44ED286A80657BCDDE293" {
 		t.Errorf("checkObjects = %q, want 85957E1D36C44ED286A80657BCDDE293", results)
 	}
@@ -58,7 +62,8 @@ func TestCheckObjectsPrivate(t *testing.T) {
 	testItemInfo := []FirehoseItemType{
 		{MessageStrings: "<private>", ItemType: 50, ItemSize: 16},
 	}
-	results := checkObjects(testFormat, testItemInfo, 50, 0)
+	logger := NewLogger()
+	results := checkObjects(testFormat, testItemInfo, 50, 0, logger)
 	if results != "<private>" {
 		t.Errorf("checkObjects = %q, want <private>", results)
 	}
@@ -69,7 +74,8 @@ func TestCheckObjectsHash(t *testing.T) {
 	testItemInfo := []FirehoseItemType{
 		{MessageStrings: "hash", ItemType: 242, ItemSize: 16},
 	}
-	results := checkObjects(testFormat, testItemInfo, 242, 0)
+	logger := NewLogger()
+	results := checkObjects(testFormat, testItemInfo, 242, 0, logger)
 	if results != "hash" {
 		t.Errorf("checkObjects = %q, want hash", results)
 	}

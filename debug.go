@@ -1,0 +1,3 @@
+package unifiedlogs
+
+func UlogsBreak() {}

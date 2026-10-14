@@ -7,7 +7,11 @@
 
 package unifiedlogs
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/alecthomas/assert/v2"
+)
 
 func TestClientAuthorizationStatus(t *testing.T) {
 	testData := "0"
@@ -44,7 +48,8 @@ func TestSubharvesterIdentifier(t *testing.T) {
 
 func TestSqlite(t *testing.T) {
 	testData := "AAAAAA=="
-	result, err := sqliteLocation(testData)
+	logger := NewLogger()
+	result, err := sqliteLocation(testData, logger)
 	if err != nil {
 		t.Fatalf("sqliteLocation returned error: %v", err)
 	}
@@ -59,8 +64,8 @@ func TestGetSqliteData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeStandard returned error: %v", err)
 	}
-
-	_, result, err := getSqliteData(decodedData)
+	logger := NewLogger()
+	_, result, err := getSqliteData(decodedData, logger)
 	if err != nil {
 		t.Fatalf("getSqliteData returned error: %v", err)
 	}
@@ -86,7 +91,7 @@ func TestLocationTrackerObject(t *testing.T) {
 
 	result := locationTrackerObject(&testData)
 
-	expected := "{\n            \"distanceFilter\":0, \n            \"desiredAccuracy\":0, \n            \"updatingLocation\":false, \n            \"requestingLocation\":false, \n            \"requestingRanging\":false, \n            \"updatingRanging\":false,\n            \"updatingHeading\":false,\n            \"headingFilter\":0,\n            \"allowsLocationPrompts\":false,\n            \"allowsAlteredAccessoryLocations\":false,\n            \"dynamicAccuracyReductionEnabled\":false,\n            \"previousAuthorizationStatusValid\":false,\n            \"previousAuthorizationStatus\":0,\n            \"limitsPrecision\":false,\n            \"activityType\":0,\n            \"pausesLocationUpdatesAutomatically\":0,\n            \"paused\":false,\n            \"allowsBackgroundLocationUpdates\":false,\n            \"showsBackgroundLocationIndicator\":false,\n            \"allowsMapCorrection\":false,\n            \"batchingLocation\":false,\n            \"updatingVehicleSpeed\":false,\n            \"updatingVehicleHeading\":false,\n            \"matchInfoEnabled\":false,\n            \"groundAltitudeEnabled\":false,\n            \"fusionInfoEnabled\":false,\n            \"courtesyPromptNeeded\":false,\n            \"isAuthorizedForWidgetUpdates\":false,\n        }"
+	expected := "{\n            \"distanceFilter\":0,\n            \"desiredAccuracy\":0,\n            \"updatingLocation\":false,\n            \"requestingLocation\":false,\n            \"requestingRanging\":false,\n            \"updatingRanging\":false,\n            \"updatingHeading\":false,\n            \"headingFilter\":0,\n            \"allowsLocationPrompts\":false,\n            \"allowsAlteredAccessoryLocations\":false,\n            \"dynamicAccuracyReductionEnabled\":false,\n            \"previousAuthorizationStatusValid\":false,\n            \"previousAuthorizationStatus\":0,\n            \"limitsPrecision\":false,\n            \"activityType\":0,\n            \"pausesLocationUpdatesAutomatically\":0,\n            \"paused\":false,\n            \"allowsBackgroundLocationUpdates\":false,\n            \"showsBackgroundLocationIndicator\":false,\n            \"allowsMapCorrection\":false,\n            \"batchingLocation\":false,\n            \"updatingVehicleSpeed\":false,\n            \"updatingVehicleHeading\":false,\n            \"matchInfoEnabled\":false,\n            \"groundAltitudeEnabled\":false,\n            \"fusionInfoEnabled\":false,\n            \"courtesyPromptNeeded\":false,\n            \"isAuthorizedForWidgetUpdates\":false,\n        }"
 	if result != expected {
 		t.Fatalf("unexpected results: %s", result)
 	}
@@ -115,10 +120,8 @@ func TestLocationManagerStateTrackerState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("locationManagerStateTrackerState returned error: %v", err)
 	}
-	expected := "{\n            \"distanceFilter\":-1, \n            \"desiredAccuracy\":100, \n            \"updatingLocation\":false, \n            \"requestingLocation\":false, \n            \"requestingRanging\":false, \n            \"updatingRanging\":false,\n            \"updatingHeading\":false,\n            \"headingFilter\":1,\n            \"allowsLocationPrompts\":true,\n            \"allowsAlteredAccessoryLocations\":false,\n            \"dynamicAccuracyReductionEnabled\":false,\n            \"previousAuthorizationStatusValid\":false,\n            \"previousAuthorizationStatus\":0,\n            \"limitsPrecision\":false,\n            \"activityType\":0,\n            \"pausesLocationUpdatesAutomatically\":1,\n            \"paused\":false,\n            \"allowsBackgroundLocationUpdates\":false,\n            \"showsBackgroundLocationIndicator\":false,\n            \"allowsMapCorrection\":true,\n            \"batchingLocation\":false,\n            \"updatingVehicleSpeed\":false,\n            \"updatingVehicleHeading\":false,\n            \"matchInfoEnabled\":false,\n            \"groundAltitudeEnabled\":false,\n            \"fusionInfoEnabled\":false,\n            \"courtesyPromptNeeded\":false,\n            \"isAuthorizedForWidgetUpdates\":false,\n        }"
-	if result != expected {
-		t.Fatalf("unexpected results: %s", result)
-	}
+	expected := "{\n            \"distanceFilter\":-1,\n            \"desiredAccuracy\":100,\n            \"updatingLocation\":false,\n            \"requestingLocation\":false,\n            \"requestingRanging\":false,\n            \"updatingRanging\":false,\n            \"updatingHeading\":false,\n            \"headingFilter\":1,\n            \"allowsLocationPrompts\":true,\n            \"allowsAlteredAccessoryLocations\":false,\n            \"dynamicAccuracyReductionEnabled\":false,\n            \"previousAuthorizationStatusValid\":false,\n            \"previousAuthorizationStatus\":0,\n            \"limitsPrecision\":false,\n            \"activityType\":0,\n            \"pausesLocationUpdatesAutomatically\":1,\n            \"paused\":false,\n            \"allowsBackgroundLocationUpdates\":false,\n            \"showsBackgroundLocationIndicator\":false,\n            \"allowsMapCorrection\":true,\n            \"batchingLocation\":false,\n            \"updatingVehicleSpeed\":false,\n            \"updatingVehicleHeading\":false,\n            \"matchInfoEnabled\":false,\n            \"groundAltitudeEnabled\":false,\n            \"fusionInfoEnabled\":false,\n            \"courtesyPromptNeeded\":false,\n            \"isAuthorizedForWidgetUpdates\":false,\n        }"
+	assert.Equal(t, expected, result)
 }
 
 func TestGetLocationTrackerState(t *testing.T) {
@@ -132,7 +135,7 @@ func TestGetLocationTrackerState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getLocationTrackerState returned error: %v", err)
 	}
-	expected := "{\n            \"distanceFilter\":-1, \n            \"desiredAccuracy\":100, \n            \"updatingLocation\":false, \n            \"requestingLocation\":false, \n            \"requestingRanging\":false, \n            \"updatingRanging\":false,\n            \"updatingHeading\":false,\n            \"headingFilter\":1,\n            \"allowsLocationPrompts\":true,\n            \"allowsAlteredAccessoryLocations\":false,\n            \"dynamicAccuracyReductionEnabled\":false,\n            \"previousAuthorizationStatusValid\":false,\n            \"previousAuthorizationStatus\":0,\n            \"limitsPrecision\":false,\n            \"activityType\":0,\n            \"pausesLocationUpdatesAutomatically\":1,\n            \"paused\":false,\n            \"allowsBackgroundLocationUpdates\":false,\n            \"showsBackgroundLocationIndicator\":false,\n            \"allowsMapCorrection\":true,\n            \"batchingLocation\":false,\n            \"updatingVehicleSpeed\":false,\n            \"updatingVehicleHeading\":false,\n            \"matchInfoEnabled\":false,\n            \"groundAltitudeEnabled\":false,\n            \"fusionInfoEnabled\":false,\n            \"courtesyPromptNeeded\":false,\n            \"isAuthorizedForWidgetUpdates\":false,\n        }"
+	expected := "{\n            \"distanceFilter\":-1,\n            \"desiredAccuracy\":100,\n            \"updatingLocation\":false,\n            \"requestingLocation\":false,\n            \"requestingRanging\":false,\n            \"updatingRanging\":false,\n            \"updatingHeading\":false,\n            \"headingFilter\":1,\n            \"allowsLocationPrompts\":true,\n            \"allowsAlteredAccessoryLocations\":false,\n            \"dynamicAccuracyReductionEnabled\":false,\n            \"previousAuthorizationStatusValid\":false,\n            \"previousAuthorizationStatus\":0,\n            \"limitsPrecision\":false,\n            \"activityType\":0,\n            \"pausesLocationUpdatesAutomatically\":1,\n            \"paused\":false,\n            \"allowsBackgroundLocationUpdates\":false,\n            \"showsBackgroundLocationIndicator\":false,\n            \"allowsMapCorrection\":true,\n            \"batchingLocation\":false,\n            \"updatingVehicleSpeed\":false,\n            \"updatingVehicleHeading\":false,\n            \"matchInfoEnabled\":false,\n            \"groundAltitudeEnabled\":false,\n            \"fusionInfoEnabled\":false,\n            \"courtesyPromptNeeded\":false,\n            \"isAuthorizedForWidgetUpdates\":false,\n        }"
 	if result != expected {
 		t.Fatalf("unexpected results: %s", result)
 	}
@@ -154,7 +157,8 @@ func TestGetDaemonStatusTracker(t *testing.T) {
 		0, 0, 0, 0, 0, 0, 240, 191, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0,
 		255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0,
 	}
-	_, result, err := getDaemonStatusTracker(testData)
+	logger := NewLogger()
+	_, result, err := getDaemonStatusTracker(testData, logger)
 	if err != nil {
 		t.Fatalf("getDaemonStatusTracker returned error: %v", err)
 	}
@@ -168,7 +172,8 @@ func TestGetDaemonStatusTrackerWasConnectedTrue(t *testing.T) {
 	testData := []byte{
 		0, 0, 0, 0, 0, 0, 89, 64, 0, 1, 19, 4, 2, 0, 0, 0, 1, 192, 243, 246, 5, 64, 0, 224, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	}
-	_, result, err := getDaemonStatusTracker(testData)
+	logger := NewLogger()
+	_, result, err := getDaemonStatusTracker(testData, logger)
 	if err != nil {
 		t.Fatalf("getDaemonStatusTracker returned error: %v", err)
 	}

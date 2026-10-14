@@ -17,7 +17,9 @@ func TestParseActivity(t *testing.T) {
 	var testFlags uint16 = 573
 	var logType uint8 = 0x1
 
-	_, results, err := parseActivity(testData, testFlags, logType)
+	logger := NewLogger()
+
+	_, results, err := parseActivity(testData, testFlags, logType, logger)
 	if err != nil {
 		t.Fatalf("parseActivity returned error: %v", err)
 	}

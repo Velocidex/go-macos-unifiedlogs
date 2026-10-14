@@ -10,14 +10,16 @@ package unifiedlogs
 import "testing"
 
 func TestUnifiedLogIterator(t *testing.T) {
-	buffer := requireTestData(t, "system_logs_big_sur.logarchive/Persist/0000000000000002.tracev3")
+	c := requireTestReadCursor(t, "system_logs_big_sur.logarchive/Persist/0000000000000002.tracev3")
 
 	it := UnifiedLogIterator{
-		Data:     buffer,
+		Reader:   c,
 		Header:   nil,
 		Evidence: "0000000000000002.tracev3",
+		Logger:   NewLogger(),
 	}
 
+	var chunks []*UnifiedLogData
 	total := 0
 	for {
 		chunk, ok := it.Next()
@@ -42,7 +44,7 @@ func TestUnifiedLogIterator(t *testing.T) {
 				t.Errorf("statedump len = %d, want 0", len(chunk.CatalogData[0].Statedump))
 			}
 		}
-
+		chunks = append(chunks, chunk)
 		total += len(chunk.CatalogData)
 	}
 
@@ -59,14 +61,18 @@ func TestUnifiedLogIteratorBuildLog(t *testing.T) {
 		t.Fatalf("CollectTimesync failed: %v", err)
 	}
 
-	buffer := requireTestData(t, "system_logs_big_sur.logarchive/Persist/0000000000000002.tracev3")
+	c := requireTestReadCursor(t, "system_logs_big_sur.logarchive/Persist/0000000000000002.tracev3")
 	it := UnifiedLogIterator{
-		Data:     buffer,
+		Reader:   c,
 		Header:   nil,
 		Evidence: "0000000000000002.tracev3",
+		Logger:   NewLogger(),
 	}
 
 	cache := NewMemoryStringCache()
+
+	logger := NewLogger()
+	parser := NewUnifiedLogParser(provider, logger, cache)
 
 	total := 0
 	for {
@@ -76,9 +82,9 @@ func TestUnifiedLogIteratorBuildLog(t *testing.T) {
 		}
 
 		excludeMissing := false
-		results, _ := BuildLog(chunk, provider, cache, timesyncData, excludeMissing)
+		results, _ := parser.BuildLog(chunk, timesyncData, excludeMissing)
 
-		if len(results) > 10 && results[10].Time == 1642302327364384800.0 {
+		if len(results) > 10 && results[10].Time.UnixNano() == 1642302327364384800 {
 			if len(results) != 3805 {
 				t.Errorf("results len = %d, want 3805", len(results))
 			}
@@ -88,8 +94,8 @@ func TestUnifiedLogIteratorBuildLog(t *testing.T) {
 			if results[10].Subsystem != "com.apple.lom" {
 				t.Errorf("subsystem = %q", results[10].Subsystem)
 			}
-			if results[10].Time != 1642302327364384800.0 {
-				t.Errorf("time = %f", results[10].Time)
+			if results[10].Time.UnixNano() != 1642302327364384800 {
+				t.Errorf("time = %v", results[10].Time.UnixNano())
 			}
 			if results[10].ActivityID != 0 {
 				t.Errorf("activity_id = %d", results[10].ActivityID)
@@ -145,11 +151,9 @@ func TestUnifiedLogIteratorBuildLog(t *testing.T) {
 
 func TestNomBytes(t *testing.T) {
 	test := []byte{1, 0, 0, 0}
-	left, _, err := nomBytes(test, 1)
+	c := NewReadCursorFromBuffer(test)
+	_, err := nomBytes(c, 1)
 	if err != nil {
 		t.Fatalf("nomBytes failed: %v", err)
-	}
-	if len(left) != 3 {
-		t.Errorf("left len = %d, want 3", len(left))
 	}
 }

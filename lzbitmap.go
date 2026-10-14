@@ -7,32 +7,45 @@
 
 package unifiedlogs
 
+import "encoding/binary"
+
 // Heavily influenced by https://github.com/fox-it/dissect.util/blob/main/dissect/util/compression/lzbitmap.py -- Apache license
 
 // lzbitmapDecompress decompresses lzbitmap data. Seen in Unified Logs starting in Golden Gate.
-func lzbitmapDecompressRemaining(data []byte) ([]byte, []byte, error) {
-	u24 := func(b []byte) int {
-		return int(b[0]) | int(b[1])<<8 | int(b[2])<<16
+func lzbitmapDecompressRemaining(
+	c *ReadCursor, logger *Logger) ([]byte, error) {
+	u24 := func(c *ReadCursor) int {
+		buf, err := c.take(3)
+		if err != nil {
+			return 0
+		}
+		buf = append(buf, 0)
+		return int(binary.LittleEndian.Uint32(buf))
 	}
 
-	if len(data) < 3 {
-		return nil, nil, ErrIncomplete
+	if c.Buffered() < 3 {
+		return nil, ErrIncomplete
 	}
-	signature := u24(data)
+	signature := u24(c)
 	// ZBM
 	const magicSignature = 5063258
 	if signature != magicSignature {
-		logger.Printf("[macos-unifiedlogs] Unexpected signature for LZBITMAP %d. Wanted ZBM", signature)
-		return nil, nil, ErrFail
+		logger.Printf(" Unexpected signature for LZBITMAP %d. Wanted ZBM", signature)
+		return nil, ErrFail
 	}
 
-	if len(data) < 4 {
-		return nil, nil, ErrIncomplete
+	if c.Buffered() < 4 {
+		return nil, ErrIncomplete
 	}
-	flags := data[3]
 
-	if !checkLzbitmapFlags(flags) {
-		return nil, nil, ErrFail
+	buf, err := c.take(1)
+	if err != nil {
+		return nil, ErrIncomplete
+	}
+	flags := buf[0]
+
+	if !checkLzbitmapFlags(flags, logger) {
+		return nil, ErrFail
 	}
 
 	const flagLarge = 1
@@ -51,16 +64,13 @@ func lzbitmapDecompressRemaining(data []byte) ([]byte, []byte, error) {
 
 	const chunkHeaderSize = 6
 	input := 4
-	for input < len(data) {
-		if input+chunkHeaderSize > len(data) {
-			return nil, nil, ErrIncomplete
-		}
-		compressSize := u24(data[input:])
-		decomSize := u24(data[input+3:])
+	for {
+		compressSize := u24(c)
+		decomSize := u24(c)
 
 		if compressSize > decomSize+chunkHeaderSize {
-			logger.Printf("[macos-unifiedlogs] Bad LZBITMAP chunk size: %d vs %d", compressSize, decomSize+chunkHeaderSize)
-			return nil, nil, ErrFail
+			logger.Printf(" Bad LZBITMAP chunk size: %d vs %d", compressSize, decomSize+chunkHeaderSize)
+			return nil, ErrFail
 		}
 
 		if decomSize == 0 {
@@ -68,17 +78,17 @@ func lzbitmapDecompressRemaining(data []byte) ([]byte, []byte, error) {
 		}
 
 		if decomSize > maxChunk {
-			logger.Printf("[macos-unifiedlogs] Chunk decompressed size is larger (%d) than expected max chunk size: %d", decomSize, maxChunk)
-			return nil, nil, ErrFail
+			logger.Printf(" Chunk decompressed size is larger (%d) than expected max chunk size: %d", decomSize, maxChunk)
+			return nil, ErrFail
 		}
 
 		// Data is not compressed. We can just append to our decompressed data
 		if compressSize == decomSize+chunkHeaderSize {
-			if input+chunkHeaderSize+decomSize > len(data) {
-				return nil, nil, ErrIncomplete
+			buf, err := c.take(decomSize)
+			if err != nil {
+				return nil, err
 			}
-			decomBuf = append(decomBuf, data[input+chunkHeaderSize:input+chunkHeaderSize+decomSize]...)
-			input += chunkHeaderSize + decomSize
+			decomBuf = append(decomBuf, buf...)
 			continue
 		}
 
@@ -86,23 +96,21 @@ func lzbitmapDecompressRemaining(data []byte) ([]byte, []byte, error) {
 		// Distance - Contains distance data needed determine how far back to look in the decompressed data
 		// Bitmap - Contains bitmap bits used to determine how to read and decompress the data. Bit 1 - read compressed data, bit 0 - copy decompressed data
 		// Token - Determines if distance or bitmap should be used
-		if input+15 > len(data) {
-			return nil, nil, ErrIncomplete
-		}
-		distanceOffset := u24(data[input+6:])
-		bitmapOffset := u24(data[input+9:])
-		tokenOffset := u24(data[input+12:])
+		distanceOffset := u24(c)
+		bitmapOffset := u24(c)
+		tokenOffset := u24(c)
 		currentOffset := 15
 
-		// Compressed data includes the offsets we read above. We need to include it in the total compressed data
-		if input+compressSize > len(data) {
-			return nil, nil, ErrIncomplete
+		// Compressed data includes the offsets we read above. We need
+		// to include it in the total compressed data
+		compressedData, err := c.take(compressSize)
+		if err != nil {
+			return nil, err
 		}
-		compressedData := data[input : input+compressSize]
 		const bitmapSize = 17
 		if bitmapSize > compressSize {
-			logger.Printf("[macos-unifiedlogs] Bitmap size larger than compressed data size: %d vs %d", bitmapSize, compressSize)
-			return nil, nil, ErrFail
+			logger.Printf(" Bitmap size larger than compressed data size: %d vs %d", bitmapSize, compressSize)
+			return nil, ErrFail
 		}
 		bitsData := compressedData[:compressSize-bitmapSize]
 
@@ -111,7 +119,7 @@ func lzbitmapDecompressRemaining(data []byte) ([]byte, []byte, error) {
 		for i := 0; i < bitmapsCount; i++ {
 			bit := i * 10
 			if bit/8+2 > len(bitsData) {
-				return nil, nil, ErrIncomplete
+				return nil, ErrIncomplete
 			}
 			bytes := uint16(bitsData[bit/8]) | uint16(bitsData[bit/8+1])<<8
 			value := bytes >> (bit % 8)
@@ -122,8 +130,8 @@ func lzbitmapDecompressRemaining(data []byte) ([]byte, []byte, error) {
 			distanceOffset > bitmapOffset ||
 			bitmapOffset > tokenOffset ||
 			tokenOffset > compressSize-bitmapSize {
-			logger.Printf("[macos-unifiedlogs] Token offset %d larger than compressed data: %d bytes", tokenOffset, compressSize)
-			return nil, nil, ErrFail
+			logger.Printf(" Token offset %d larger than compressed data: %d bytes", tokenOffset, compressSize)
+			return nil, ErrFail
 		}
 
 		tokenBytes := compressedData[tokenOffset : len(compressedData)-bitmapSize]
@@ -133,17 +141,17 @@ func lzbitmapDecompressRemaining(data []byte) ([]byte, []byte, error) {
 		for decomSize > 0 {
 			index, ok := tokens.next()
 			if !ok {
-				return nil, nil, ErrFail
+				return nil, ErrFail
 			}
 
 			var repeatToken uint32
 			if runLengthEncodedTokens {
 				if index == 0xf {
-					return nil, nil, ErrFail
+					return nil, ErrFail
 				}
 				value, ok := getLzRepeatToken(tokens, decomSize)
 				if !ok {
-					return nil, nil, ErrFail
+					return nil, ErrFail
 				}
 				repeatToken = value
 			} else {
@@ -152,7 +160,7 @@ func lzbitmapDecompressRemaining(data []byte) ([]byte, []byte, error) {
 
 			for r := uint32(0); r < repeatToken; r++ {
 				if int(index) >= len(tokenMap) {
-					return nil, nil, ErrFail
+					return nil, ErrFail
 				}
 				bitmap := tokenMap[index].bitmap
 				distanceBytes := tokenMap[index].distanceBytes
@@ -160,7 +168,7 @@ func lzbitmapDecompressRemaining(data []byte) ([]byte, []byte, error) {
 				// Indexes less than 3 use bitmap from bitmap bytes
 				if index < 3 {
 					if int(bitmapOffset) >= len(compressedData) {
-						return nil, nil, ErrFail
+						return nil, ErrFail
 					}
 					bitmap = compressedData[bitmapOffset]
 					bitmapOffset++
@@ -170,35 +178,35 @@ func lzbitmapDecompressRemaining(data []byte) ([]byte, []byte, error) {
 				case 0:
 				case 1:
 					if int(distanceOffset) >= len(compressedData) {
-						return nil, nil, ErrFail
+						return nil, ErrFail
 					}
 					distance = int(compressedData[distanceOffset])
 					distanceOffset++
 				case 2:
 					if int(distanceOffset)+2 > len(compressedData) {
-						return nil, nil, ErrFail
+						return nil, ErrFail
 					}
 					distance = int(uint16(compressedData[distanceOffset]) | uint16(compressedData[distanceOffset+1])<<8)
 					distanceOffset += 2
 				default:
-					return nil, nil, ErrFail
+					return nil, ErrFail
 				}
 
 				for i := 0; i < 8; i++ {
 					if bitmap&1 != 0 {
 						if currentOffset >= len(compressedData) {
-							return nil, nil, ErrFail
+							return nil, ErrFail
 						}
 						decomBuf = append(decomBuf, compressedData[currentOffset])
 						currentOffset++
 					} else {
 						if distance == 0 {
-							logger.Printf("[macos-unifiedlogs] Got distance 0 for checked_sub on decompressed data")
-							return nil, nil, ErrFail
+							logger.Printf(" Got distance 0 for checked_sub on decompressed data")
+							return nil, ErrFail
 						}
 						sourceOffset := len(decomBuf) - distance
 						if sourceOffset < 0 {
-							return nil, nil, ErrFail
+							return nil, ErrFail
 						}
 						decomBuf = append(decomBuf, decomBuf[sourceOffset])
 					}
@@ -220,13 +228,14 @@ func lzbitmapDecompressRemaining(data []byte) ([]byte, []byte, error) {
 		input += compressSize
 	}
 
-	return data[input:], decomBuf, nil
+	return decomBuf, nil
 }
 
 // lzbitmapDecompress decompresses lzbitmap data and discards the remaining input
 // bytes. Seen in Unified Logs starting in Golden Gate.
-func lzbitmapDecompress(data []byte) ([]byte, error) {
-	_, decompressed, err := lzbitmapDecompressRemaining(data)
+func lzbitmapDecompress(
+	c *ReadCursor, logger *Logger) ([]byte, error) {
+	decompressed, err := lzbitmapDecompressRemaining(c, logger)
 	return decompressed, err
 }
 
@@ -299,16 +308,17 @@ func getLzRepeatToken(tokens *lzBitmapTokens, remaining int) (uint32, bool) {
 }
 
 // checkLzbitmapFlags checks for unknown flags
-func checkLzbitmapFlags(flag uint8) bool {
+func checkLzbitmapFlags(
+	flag uint8, logger *Logger) bool {
 	switch flag {
 	case 0x9, 0xc:
 		return true
 	case 0x8, 0xd:
 		// These flags could exist but so far have not been seen in wild
-		logger.Printf("[macos-unifiedlogs] Got possible flag %d", flag)
+		logger.Printf(" Got possible flag %d", flag)
 		return true
 	default:
-		logger.Printf("[macos-unifiedlogs] Got unsupported flag %d", flag)
+		logger.Printf(" Got unsupported flag %d", flag)
 		return false
 	}
 }

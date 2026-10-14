@@ -10,9 +10,10 @@ package unifiedlogs
 import "testing"
 
 func TestParseDSCVersionOne(t *testing.T) {
-	buffer := requireTestData(t, "DSC Tests/big_sur_version_1_522F6217CB113F8FB845C2A1B784C7C2")
+	buffer := requireTestReadCursor(t, "DSC Tests/big_sur_version_1_522F6217CB113F8FB845C2A1B784C7C2")
 
-	results, err := parseDSC(buffer)
+	logger := NewLogger()
+	results, err := ParseDSC(buffer, logger)
 	if err != nil {
 		t.Fatalf("parseDSC returned error: %v", err)
 	}
@@ -72,9 +73,10 @@ func TestParseDSCVersionOne(t *testing.T) {
 }
 
 func TestParseDSCVersionTwo(t *testing.T) {
-	buffer := requireTestData(t, "DSC Tests/monterey_version_2_3D05845F3F65358F9EBF2236E772AC01")
+	buffer := requireTestReadCursor(t, "DSC Tests/monterey_version_2_3D05845F3F65358F9EBF2236E772AC01")
 
-	results, err := parseDSC(buffer)
+	logger := NewLogger()
+	results, err := ParseDSC(buffer, logger)
 	if err != nil {
 		t.Fatalf("parseDSC returned error: %v", err)
 	}
@@ -134,24 +136,27 @@ func TestParseDSCVersionTwo(t *testing.T) {
 }
 
 func TestParseDSCBadHeader(t *testing.T) {
-	buffer := requireTestData(t, "Bad Data/DSC/bad_header_version_1_522F6217CB113F8FB845C2A1B784C7C2")
+	buffer := requireTestReadCursor(t, "Bad Data/DSC/bad_header_version_1_522F6217CB113F8FB845C2A1B784C7C2")
 
-	_, err := parseDSC(buffer)
+	logger := NewLogger()
+	_, err := ParseDSC(buffer, logger)
 	requireErrIncomplete(t, err)
 }
 
 func TestParseDSCBadContent(t *testing.T) {
-	buffer := requireTestData(t, "Bad Data/DSC/bad_content_version_1_522F6217CB113F8FB845C2A1B784C7C2")
+	buffer := requireTestReadCursor(t, "Bad Data/DSC/bad_content_version_1_522F6217CB113F8FB845C2A1B784C7C2")
 
-	_, err := parseDSC(buffer)
+	logger := NewLogger()
+	_, err := ParseDSC(buffer, logger)
 	if err == nil {
 		t.Fatal("expected error for bad DSC content, got nil")
 	}
 }
 
 func TestParseDSCBadFile(t *testing.T) {
-	buffer := requireTestData(t, "Bad Data/DSC/Badfile")
+	buffer := requireTestReadCursor(t, "Bad Data/DSC/Badfile")
 
-	_, err := parseDSC(buffer)
+	logger := NewLogger()
+	_, err := ParseDSC(buffer, logger)
 	requireErrIncomplete(t, err)
 }

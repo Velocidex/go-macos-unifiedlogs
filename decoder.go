@@ -39,7 +39,9 @@ func (e *DecoderError) Debug() string {
 
 // checkObjects checks if a log value contains one of the supported decoders and
 // decodes it to a string.
-func checkObjects(formatString string, messageValues []FirehoseItemType, itemType uint8, itemIndex int) string {
+func checkObjects(
+	formatString string, messageValues []FirehoseItemType,
+	itemType uint8, itemIndex int, logger *Logger) string {
 	index := itemIndex
 	const precisionItem uint8 = 0x12
 
@@ -67,7 +69,7 @@ func checkObjects(formatString string, messageValues []FirehoseItemType, itemTyp
 	case strings.Contains(formatString, "bool"):
 		return lowercaseBool(messageString)
 	case strings.Contains(formatString, "uuid_t"):
-		return decodeOrLog(parseUUID(messageString))
+		return logger.decodeOrLog(parseUUID(messageString))
 	case strings.Contains(formatString, "darwin.errno"):
 		return errnoCodes(messageString)
 	case strings.Contains(formatString, "mach.errno"):
@@ -77,90 +79,92 @@ func checkObjects(formatString string, messageValues []FirehoseItemType, itemTyp
 	case strings.Contains(formatString, "darwin.mode"):
 		return permission(messageString)
 	case strings.Contains(formatString, "odtypes:ODError"):
-		return openDirectoryErrors(messageString)
+		return openDirectoryErrors(messageString, logger)
 	case strings.Contains(formatString, "odtypes:mbridtype"):
-		return memberIDType(messageString)
+		return memberIDType(messageString, logger)
 	case strings.Contains(formatString, "odtypes:mbr_details"):
-		return decodeOrLog(memberDetails(messageString))
+		return logger.decodeOrLog(memberDetails(messageString, logger))
 	case strings.Contains(formatString, "odtypes:nt_sid_t"):
-		return decodeOrLog(sidDetails(messageString))
+		return logger.decodeOrLog(sidDetails(messageString))
 	case strings.Contains(formatString, "location:CLClientAuthorizationStatus"):
-		return decodeOrLog(clientAuthorizationStatus(messageString))
+		return logger.decodeOrLog(clientAuthorizationStatus(messageString))
 	case strings.Contains(formatString, "location:CLDaemonStatus_Type::Reachability"):
-		return decodeOrLog(daemonStatusType(messageString))
+		return logger.decodeOrLog(daemonStatusType(messageString))
 	case strings.Contains(formatString, "location:CLSubHarvesterIdentifier"):
-		return decodeOrLog(subharvesterIdentifier(messageString))
+		return logger.decodeOrLog(subharvesterIdentifier(messageString))
 	case strings.Contains(formatString, "location:SqliteResult"):
-		return decodeOrLog(sqliteLocation(messageString))
+		return logger.decodeOrLog(sqliteLocation(messageString, logger))
 	case strings.Contains(formatString, "location:_CLClientManagerStateTrackerState"):
-		return decodeOrLog(clientManagerStateTrackerState(messageString))
+		return logger.decodeOrLog(clientManagerStateTrackerState(messageString))
 	case strings.Contains(formatString, "location:_CLLocationManagerStateTrackerState"):
-		return decodeOrLog(locationManagerStateTrackerState(messageString))
+		return logger.decodeOrLog(locationManagerStateTrackerState(messageString))
 	case strings.Contains(formatString, "network:in6_addr"):
-		return decodeIPOrLog(ipvSix(messageString))
+		return logger.decodeIPOrLog(ipvSix(messageString))
 	case strings.Contains(formatString, "network:in_addr"):
-		return decodeIPOrLog(ipvFour(messageString))
+		return logger.decodeIPOrLog(ipvFour(messageString))
 	case strings.Contains(formatString, "network:sockaddr"):
-		return decodeOrLog(sockaddr(messageString))
+		return logger.decodeOrLog(sockaddr(messageString, logger))
 	case strings.Contains(formatString, "time_t"):
-		return decodeOrLog(parseTime(messageString))
+		return logger.decodeOrLog(parseTime(messageString))
 	case strings.Contains(formatString, "mdns:dnshdr"):
-		return decodeOrLog(parseDnsHeader(messageString))
+		return logger.decodeOrLog(parseDnsHeader(messageString))
 	case strings.Contains(formatString, "mdns:rd.svcb"):
-		return decodeOrLog(getServiceBinding(messageString))
+		return logger.decodeOrLog(
+			getServiceBinding(messageString, logger))
 	case strings.Contains(formatString, "location:IOMessage"):
-		return decodeOrLog(ioMessage(messageString))
+		return logger.decodeOrLog(ioMessage(messageString))
 	case strings.Contains(formatString, "mdnsresponder:domain_name"):
-		return decodeOrLog(getDomainName(messageString))
+		return logger.decodeOrLog(
+			getDomainName(messageString, logger))
 	case strings.Contains(formatString, "mdnsresponder:mac_addr"):
-		return decodeOrLog(getDnsMacAddr(messageString))
+		return logger.decodeOrLog(getDnsMacAddr(messageString))
 	case strings.Contains(formatString, "mdnsresponder:ip_addr"):
-		return decodeOrLog(dnsIPAddr(messageString))
+		return logger.decodeOrLog(dnsIPAddr(messageString))
 	case strings.Contains(formatString, "mdns:addrmv"):
 		return dnsAddRmv(messageString)
 	case strings.Contains(formatString, "mdns:rrtype"):
-		return decodeOrLog(dnsRecords(messageString))
+		return logger.decodeOrLog(dnsRecords(messageString))
 	case strings.Contains(formatString, "mdns:nreason"):
-		return decodeOrLog(dnsReason(messageString))
+		return logger.decodeOrLog(dnsReason(messageString))
 	case strings.Contains(formatString, "mdns:protocol"):
-		return decodeOrLog(dnsProtocol(messageString))
+		return logger.decodeOrLog(dnsProtocol(messageString))
 	case strings.Contains(formatString, "mdns:dns.idflags"):
-		return decodeOrLog(dnsIDFlags(messageString))
+		return logger.decodeOrLog(dnsIDFlags(messageString))
 	case strings.Contains(formatString, "mdns:dns.counts"):
-		return decodeCountsOrLog(dnsCounts(messageString))
+		return logger.decodeCountsOrLog(dnsCounts(messageString))
 	case strings.Contains(formatString, "mdns:yesno"):
 		return dnsYesNo(messageString)
 	case strings.Contains(formatString, "mdns:acceptable"):
 		return dnsAcceptable(messageString)
 	case strings.Contains(formatString, "mdns:gaiopts"):
-		return decodeOrLog(dnsGetaddrinfoOpts(messageString))
+		return logger.decodeOrLog(dnsGetaddrinfoOpts(messageString))
 	}
 	return ""
 }
 
 // decodeOrLog returns the decoded value, or logs the error and returns its
 // message (mirrors the Rust `Err(e) => { log::error!(...); e.to_string() }`).
-func decodeOrLog(value string, err error) string {
+func (self Logger) decodeOrLog(value string, err error) string {
 	if err != nil {
-		logger.Printf("[macos-unifiedlogs] Failed to decode log object. Error: %v", err)
+		self.Printf("Failed to decode log object. Error: %v", err)
 		return err.Error()
 	}
 	return value
 }
 
 // decodeIPOrLog is like decodeOrLog but formats a net.IP result.
-func decodeIPOrLog(value interface{ String() string }, err error) string {
+func (self Logger) decodeIPOrLog(value interface{ String() string }, err error) string {
 	if err != nil {
-		logger.Printf("[macos-unifiedlogs] Failed to decode log object. Error: %v", err)
+		self.Printf("Failed to decode log object. Error: %v", err)
 		return err.Error()
 	}
 	return value.String()
 }
 
 // decodeCountsOrLog is like decodeOrLog but formats a DnsCounts result.
-func decodeCountsOrLog(value DnsCounts, err error) string {
+func (self Logger) decodeCountsOrLog(value DnsCounts, err error) string {
 	if err != nil {
-		logger.Printf("[macos-unifiedlogs] Failed to decode log object. Error: %v", err)
+		self.Printf("Failed to decode log object. Error: %v", err)
 		return err.Error()
 	}
 	return value.String()

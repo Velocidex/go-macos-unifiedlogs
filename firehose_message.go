@@ -31,7 +31,11 @@ type MessageParams struct {
 }
 
 // getMessage gets the base message for the log entry based on the formatter flags.
-func getMessage(formatters FirehoseFormatters, provider FileProvider, cache StringCache, params MessageParams, catalogs *CatalogChunk) ([]byte, MessageData, error) {
+func getMessage(formatters FirehoseFormatters,
+	provider FileProvider,
+	cache StringCache,
+	params MessageParams,
+	catalogs *CatalogChunk) ([]byte, MessageData, error) {
 	stringOffset := params.StringOffset
 
 	sharedCacheString := formatters.SharedCache ||
@@ -55,18 +59,34 @@ func getMessage(formatters FirehoseFormatters, provider FileProvider, cache Stri
 
 	if formatters.Absolute {
 		offset := (0x100000000 * uint64(formatters.MainExeAltIndex)) + uint64(params.PCID)
-		return extractAbsoluteStrings(provider, cache, offset, stringOffset, params.FirstProcID, params.SecondProcID, catalogs, stringOffset)
+		return extractAbsoluteStrings(provider, cache, offset,
+			stringOffset, params.FirstProcID, params.SecondProcID, catalogs, stringOffset)
 	}
 	if formatters.UuidRelative != "" {
-		return extractAltUUIDStrings(provider, cache, stringOffset, formatters.UuidRelative, params.FirstProcID, params.SecondProcID, catalogs, stringOffset)
+		return extractAltUUIDStrings(provider, cache,
+			stringOffset, formatters.UuidRelative, params.FirstProcID, params.SecondProcID, catalogs, stringOffset)
+
 	}
-	return extractFormatStrings(provider, cache, stringOffset, params.FirstProcID, params.SecondProcID, catalogs, stringOffset)
+	return extractFormatStrings(provider, cache,
+		stringOffset, params.FirstProcID, params.SecondProcID, catalogs, stringOffset)
 }
 
 // extractSharedStrings extracts a string from the Shared Strings Cache (dsc data).
 // Shared strings contain library and message string.
-func extractSharedStrings(provider FileProvider, cache StringCache, stringOffset uint64, firstProcID uint64, secondProcID uint32, catalogs *CatalogChunk, originalOffset uint64) ([]byte, MessageData, error) {
-	logger.Printf("[macos-unifiedlogs] Extracting format string from shared cache file (dsc)")
+func extractSharedStrings(provider FileProvider,
+	cache StringCache,
+	stringOffset uint64,
+	firstProcID uint64,
+	secondProcID uint32,
+	catalogs *CatalogChunk,
+	originalOffset uint64) ([]byte, MessageData, error) {
+
+	logger := provider.Logger()
+
+	logger.Debugf(
+		"Extracting format string @%v from shared cache file (dsc)",
+		stringOffset)
+
 	var messageData MessageData
 
 	dscUUID, mainUUID := getCatalogDSC(catalogs, firstProcID, secondProcID)
@@ -77,7 +97,7 @@ func extractSharedStrings(provider FileProvider, cache StringCache, stringOffset
 		if err == nil && sharedString != nil && len(sharedString.Ranges) > 0 {
 			uuidIndexUint := sharedString.Ranges[0].UUIDIndex
 			if uuidIndexUint >= uint64(len(sharedString.UUIDs)) {
-				logger.Printf("[macos-unifiedlogs] UUID index %d out of bounds (max: %d). Malformed data.", uuidIndexUint, len(sharedString.UUIDs))
+				logger.Printf("UUID index %d out of bounds (max: %d). Malformed data.", uuidIndexUint, len(sharedString.UUIDs))
 				messageData.FormatString = "Error: Invalid UUID index"
 				return []byte{}, messageData, nil
 			}
@@ -104,17 +124,19 @@ func extractSharedStrings(provider FileProvider, cache StringCache, stringOffset
 				offset := stringOffset - ranges.RangeOffset
 				stringData := ranges.Strings
 
-				// If the offset and string data are equal then the next range entry contains the string message
+				// If the offset and string data are equal then the
+				// next range entry contains the string message
 				if int(offset) == len(stringData) {
 					continue
 				}
 
 				if offset > uint64(len(stringData)) {
-					logger.Printf("[macos-unifiedlogs] u64 is bigger than system usize")
+					logger.Printf("offset %v > len(stringData) %v", offset, len(stringData))
 					return nil, messageData, ErrEof
 				}
 
-				_, messageString, err := extractString(stringData[offset:])
+				_, messageString, err := extractString(
+					stringData[offset:], logger)
 				if err != nil {
 					return nil, messageData, err
 				}
@@ -122,7 +144,7 @@ func extractSharedStrings(provider FileProvider, cache StringCache, stringOffset
 
 				uuidIndexUint := ranges.UUIDIndex
 				if uuidIndexUint >= uint64(len(sharedString.UUIDs)) {
-					logger.Printf("[macos-unifiedlogs] UUID index %d out of bounds (max: %d). Malformed data.", uuidIndexUint, len(sharedString.UUIDs))
+					logger.Printf("UUID index %d out of bounds (max: %d). Malformed data.", uuidIndexUint, len(sharedString.UUIDs))
 					messageData.FormatString = "Error: Invalid UUID index"
 					return []byte{}, messageData, nil
 				}
@@ -148,7 +170,7 @@ func extractSharedStrings(provider FileProvider, cache StringCache, stringOffset
 		if len(sharedString.Ranges) > 0 {
 			uuidIndexUint := sharedString.Ranges[0].UUIDIndex
 			if uuidIndexUint >= uint64(len(sharedString.UUIDs)) {
-				logger.Printf("[macos-unifiedlogs] UUID index %d out of bounds (max: %d). Malformed data.", uuidIndexUint, len(sharedString.UUIDs))
+				logger.Printf("UUID index %d out of bounds (max: %d). Malformed data.", uuidIndexUint, len(sharedString.UUIDs))
 				messageData.FormatString = "Error: Invalid UUID index"
 				return []byte{}, messageData, nil
 			}
@@ -168,16 +190,29 @@ func extractSharedStrings(provider FileProvider, cache StringCache, stringOffset
 		}
 	}
 
-	logger.Printf("[macos-unifiedlogs] Failed to get message string from Shared Strings DSC file")
+	logger.Printf(
+		"Failed to get message string %v from Shared Strings DSC file",
+		stringOffset)
 	messageData.FormatString = "Unknown shared string message"
 	return []byte{}, messageData, nil
 }
 
 // extractFormatStrings extracts strings from the UUIDText file associated with the log entry.
 // UUIDText file contains process and message string.
-func extractFormatStrings(provider FileProvider, cache StringCache, stringOffset uint64, firstProcID uint64, secondProcID uint32, catalogs *CatalogChunk, originalOffset uint64) ([]byte, MessageData, error) {
-	logger.Printf("[macos-unifiedlogs] Extracting format string from UUID file")
+func extractFormatStrings(
+	provider FileProvider,
+	cache StringCache,
+	stringOffset uint64,
+	firstProcID uint64,
+	secondProcID uint32,
+	catalogs *CatalogChunk,
+	originalOffset uint64) ([]byte, MessageData, error) {
+
+	logger := provider.Logger()
+
 	_, mainUUID := getCatalogDSC(catalogs, firstProcID, secondProcID)
+	logger.Debugf("Extracting format string from UUID file %v",
+		mainUUID)
 
 	// log entries with main_exe flag do not use dsc cache uuid file
 	messageData := MessageData{
@@ -189,7 +224,8 @@ func extractFormatStrings(provider FileProvider, cache StringCache, stringOffset
 	if originalOffset&0x80000000 != 0 {
 		if data, err := cache.GetOrLoadUUIDText(messageData.ProcessUUID, provider); err == nil && data != nil {
 			footerData := data.FooterData
-			_, processString, err := uuidtextImagePath(footerData, data.EntryDescriptors)
+			_, processString, err := uuidtextImagePath(
+				footerData, data.EntryDescriptors, logger)
 			if err != nil {
 				return nil, messageData, err
 			}
@@ -217,12 +253,14 @@ func extractFormatStrings(provider FileProvider, cache StringCache, stringOffset
 			}
 
 			messageStart := footerData[offset+stringStart:]
-			_, messageString, err := extractString(messageStart)
+			_, messageString, err := extractString(
+				messageStart, logger)
 			if err != nil {
 				return nil, messageData, err
 			}
 
-			_, processString, err := uuidtextImagePath(footerData, data.EntryDescriptors)
+			_, processString, err := uuidtextImagePath(
+				footerData, data.EntryDescriptors, logger)
 			if err != nil {
 				return nil, messageData, err
 			}
@@ -238,7 +276,8 @@ func extractFormatStrings(provider FileProvider, cache StringCache, stringOffset
 	// Apple labels as "error: ~~> Invalid bounds 4334340 for E502E11E-518F-38A7-9F0B-E129168338E7"
 	if data, err := cache.GetOrLoadUUIDText(messageData.ProcessUUID, provider); err == nil && data != nil {
 		footerData := data.FooterData
-		_, processString, err := uuidtextImagePath(footerData, data.EntryDescriptors)
+		_, processString, err := uuidtextImagePath(
+			footerData, data.EntryDescriptors, logger)
 		if err != nil {
 			return nil, messageData, err
 		}
@@ -248,20 +287,34 @@ func extractFormatStrings(provider FileProvider, cache StringCache, stringOffset
 		return []byte{}, messageData, nil
 	}
 
-	logger.Printf("[macos-unifiedlogs] Failed to get message string from UUIDText file: %s", messageData.ProcessUUID)
+	logger.Printf(
+		"Failed to get message string from UUIDText file: %s",
+		messageData.ProcessUUID)
 	messageData.FormatString = "Failed to get string message from UUIDText file: " + messageData.ProcessUUID
+
 	return []byte{}, messageData, nil
 }
 
 // extractAbsoluteStrings extracts strings from the UUIDText file associated with a log entry
 // that has the `absolute` flag set.
-func extractAbsoluteStrings(provider FileProvider, cache StringCache, absoluteOffset uint64, stringOffset uint64, firstProcID uint64, secondProcID uint32, catalogs *CatalogChunk, originalOffset uint64) ([]byte, MessageData, error) {
-	logger.Printf("[macos-unifiedlogs] Extracting format string from UUID file for log entry with Absolute flag")
+func extractAbsoluteStrings(
+	provider FileProvider,
+	cache StringCache,
+	absoluteOffset uint64,
+	stringOffset uint64,
+	firstProcID uint64,
+	secondProcID uint32,
+	catalogs *CatalogChunk,
+	originalOffset uint64) ([]byte, MessageData, error) {
+
+	logger := provider.Logger()
+
+	logger.Debugf("Extracting format string from UUID file for log entry with Absolute flag")
 	var uuid string
 	if entry, ok := catalogs.CatalogProcessInfoEntries[procIDKey(firstProcID, secondProcID)]; ok {
 		for _, uuids := range entry.UUIDInfoEntries {
 			if absoluteOffset >= uuids.LoadAddress && absoluteOffset <= (uuids.LoadAddress+uint64(uuids.Size)) {
-				logger.Printf("[macos-unifiedlogs] Absolute uuid file is: %s", uuids.UUID)
+				logger.Debugf("Absolute uuid file is: %s", uuids.UUID)
 				uuid = uuids.UUID
 				break
 			}
@@ -279,7 +332,8 @@ func extractAbsoluteStrings(provider FileProvider, cache StringCache, absoluteOf
 	if (originalOffset&0x80000000 != 0) || stringOffset == absoluteOffset {
 		if data, err := cache.GetOrLoadUUIDText(messageData.LibraryUUID, provider); err == nil && data != nil {
 			footerData := data.FooterData
-			_, libraryString, err := uuidtextImagePath(footerData, data.EntryDescriptors)
+			_, libraryString, err := uuidtextImagePath(
+				footerData, data.EntryDescriptors, logger)
 			if err != nil {
 				return nil, messageData, err
 			}
@@ -312,16 +366,19 @@ func extractAbsoluteStrings(provider FileProvider, cache StringCache, absoluteOf
 			}
 
 			if (offset + stringStart) > uint64(len(footerData)) {
-				logger.Printf("[macos-unifiedlogs] u64 is bigger than system usize")
+				logger.Printf("offset+stringStart %v > len(footerData) %v",
+					offset+stringStart, len(footerData))
 				return nil, messageData, ErrEof
 			}
 			messageStart := footerData[offset+stringStart:]
-			_, messageString, err := extractString(messageStart)
+			_, messageString, err := extractString(
+				messageStart, logger)
 			if err != nil {
 				return nil, messageData, err
 			}
 
-			_, libraryString, err := uuidtextImagePath(footerData, data.EntryDescriptors)
+			_, libraryString, err := uuidtextImagePath(
+				footerData, data.EntryDescriptors, logger)
 			if err != nil {
 				return nil, messageData, err
 			}
@@ -340,7 +397,8 @@ func extractAbsoluteStrings(provider FileProvider, cache StringCache, absoluteOf
 	// There is a chance the log entry does not have a valid offset
 	if data, err := cache.GetOrLoadUUIDText(messageData.LibraryUUID, provider); err == nil && data != nil {
 		footerData := data.FooterData
-		_, libraryString, err := uuidtextImagePath(footerData, data.EntryDescriptors)
+		_, libraryString, err := uuidtextImagePath(
+			footerData, data.EntryDescriptors, logger)
 		if err != nil {
 			return nil, messageData, err
 		}
@@ -355,15 +413,26 @@ func extractAbsoluteStrings(provider FileProvider, cache StringCache, absoluteOf
 		return []byte{}, messageData, nil
 	}
 
-	logger.Printf("[macos-unifiedlogs] Failed to get message string from absolute UUIDText file: %s", messageData.LibraryUUID)
+	logger.Printf("Failed to get message string from absolute UUIDText file: %s", messageData.LibraryUUID)
 	messageData.FormatString = "Failed to get string message from absolute UUIDText file: " + messageData.LibraryUUID
 	return []byte{}, messageData, nil
 }
 
 // extractAltUUIDStrings extracts strings from an alt UUIDText file specified within the log entry
 // that has the `uuid_relative` flag set.
-func extractAltUUIDStrings(provider FileProvider, cache StringCache, stringOffset uint64, uuid string, firstProcID uint64, secondProcID uint32, catalogs *CatalogChunk, originalOffset uint64) ([]byte, MessageData, error) {
-	logger.Printf("[macos-unifiedlogs] Extracting format string from alt uuid")
+func extractAltUUIDStrings(
+	provider FileProvider,
+	cache StringCache,
+	stringOffset uint64,
+	uuid string,
+	firstProcID uint64,
+	secondProcID uint32,
+	catalogs *CatalogChunk,
+	originalOffset uint64) ([]byte, MessageData, error) {
+
+	logger := provider.Logger()
+
+	logger.Debugf("Extracting format string from alt uuid")
 	// Log entries with uuid_relative flags set have the UUID in the log itself. They do not use the dsc UUID files
 	_, mainUUID := getCatalogDSC(catalogs, firstProcID, secondProcID)
 
@@ -376,7 +445,8 @@ func extractAltUUIDStrings(provider FileProvider, cache StringCache, stringOffse
 	if originalOffset&0x80000000 != 0 {
 		if data, err := cache.GetOrLoadUUIDText(uuid, provider); err == nil && data != nil {
 			footerData := data.FooterData
-			_, libraryString, err := uuidtextImagePath(footerData, data.EntryDescriptors)
+			_, libraryString, err := uuidtextImagePath(
+				footerData, data.EntryDescriptors, logger)
 			if err != nil {
 				return nil, messageData, err
 			}
@@ -407,16 +477,19 @@ func extractAltUUIDStrings(provider FileProvider, cache StringCache, stringOffse
 				continue
 			}
 			if (offset + stringStart) > uint64(len(footerData)) {
-				logger.Printf("[macos-unifiedlogs] u64 is bigger than system usize")
+				logger.Printf("offset+stringStart %v > len(footerData) %v",
+					offset+stringStart, len(footerData))
 				return nil, messageData, ErrEof
 			}
 			messageStart := footerData[offset+stringStart:]
-			_, messageString, err := extractString(messageStart)
+			_, messageString, err := extractString(
+				messageStart, logger)
 			if err != nil {
 				return nil, messageData, err
 			}
 
-			_, libraryString, err := uuidtextImagePath(footerData, data.EntryDescriptors)
+			_, libraryString, err := uuidtextImagePath(
+				footerData, data.EntryDescriptors, logger)
 			if err != nil {
 				return nil, messageData, err
 			}
@@ -436,7 +509,8 @@ func extractAltUUIDStrings(provider FileProvider, cache StringCache, stringOffse
 	// There is a chance the log entry does not have a valid offset
 	if data, err := cache.GetOrLoadUUIDText(uuid, provider); err == nil && data != nil {
 		footerData := data.FooterData
-		_, libraryString, err := uuidtextImagePath(footerData, data.EntryDescriptors)
+		_, libraryString, err := uuidtextImagePath(
+			footerData, data.EntryDescriptors, logger)
 		if err != nil {
 			return nil, messageData, err
 		}
@@ -451,13 +525,15 @@ func extractAltUUIDStrings(provider FileProvider, cache StringCache, stringOffse
 		return []byte{}, messageData, nil
 	}
 
-	logger.Printf("[macos-unifiedlogs] Failed to get message string from alternative UUIDText file: %s", uuid)
+	logger.Printf(" Failed to get message string from alternative UUIDText file: %s", uuid)
 	messageData.FormatString = "Failed to get string message from alternative UUIDText file: " + uuid
 	return []byte{}, messageData, nil
 }
 
 // uuidtextImagePath gets the image path at the end of the UUIDText file.
-func uuidtextImagePath(data []byte, entries []UUIDTextEntry) ([]byte, string, error) {
+func uuidtextImagePath(
+	data []byte,
+	entries []UUIDTextEntry, logger *Logger) ([]byte, string, error) {
 	var imageLibraryOffset uint32
 	for _, entry := range entries {
 		imageLibraryOffset += entry.EntrySize
@@ -466,7 +542,8 @@ func uuidtextImagePath(data []byte, entries []UUIDTextEntry) ([]byte, string, er
 		return nil, "", ErrEof
 	}
 	libraryStart := data[imageLibraryOffset:]
-	_, result, err := extractString(libraryStart)
+	_, result, err := extractString(
+		libraryStart, logger)
 	if err != nil {
 		return nil, "", err
 	}
@@ -474,24 +551,34 @@ func uuidtextImagePath(data []byte, entries []UUIDTextEntry) ([]byte, string, er
 }
 
 // getUUIDImagePath gets the image path from the provided main UUID entry.
-func getUUIDImagePath(mainUUID string, provider FileProvider, cache StringCache) ([]byte, string, error) {
+func getUUIDImagePath(
+	mainUUID string,
+	provider FileProvider,
+	cache StringCache) ([]byte, string, error) {
+
+	logger := provider.Logger()
+
 	// An UUID of all zeros is possible in the Catalog, if this happens there is no process path
 	if mainUUID == "00000000000000000000000000000000" {
-		logger.Printf("[macos-unifiedlogs] Got UUID of all zeros fom Catalog")
+		logger.Debugf(" Got UUID of all zeros fom Catalog")
 		return []byte{}, "", nil
 	}
 
 	if data, err := cache.GetOrLoadUUIDText(mainUUID, provider); err == nil && data != nil {
-		return uuidtextImagePath(data.FooterData, data.EntryDescriptors)
+		return uuidtextImagePath(
+			data.FooterData, data.EntryDescriptors, logger)
 	}
 
-	logger.Printf("[macos-unifiedlogs] Failed to get path string from UUIDText file for entry: %s", mainUUID)
+	logger.Printf(" Failed to get path string from UUIDText file for entry: %s", mainUUID)
 	return []byte{}, "Failed to get path string from UUIDText file for entry: " + mainUUID, nil
 }
 
 // getCatalogDSC gets the dsc file name from the Catalog data based on first and
 // second proc ids from the Firehose log.
-func getCatalogDSC(catalogs *CatalogChunk, firstProcID uint64, secondProcID uint32) (string, string) {
+func getCatalogDSC(
+	catalogs *CatalogChunk,
+	firstProcID uint64,
+	secondProcID uint32) (string, string) {
 	var dscUUID string
 	var mainUUID string
 

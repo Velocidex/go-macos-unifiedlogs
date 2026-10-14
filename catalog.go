@@ -120,24 +120,16 @@ type CatalogPersona struct {
 // parseCatalog parses log Catalog data. The log Catalog contains metadata
 // related to log entries such as Process info, Subsystem info, and the
 // compressed log entries.
-func parseCatalog(input []byte) ([]byte, CatalogChunk, error) {
+func parseCatalog(c *ReadCursor,
+	preamble *LogPreamble,
+	logger *Logger) (CatalogChunk, error) {
 	var catalog CatalogChunk
-
-	preamble, err := parsePreamble(input)
-	if err != nil {
-		return nil, catalog, err
-	}
-
-	c := newCursor(input)
-	if err := c.skip(16); err != nil {
-		return nil, catalog, err
-	}
 
 	fields := make([]uint16, 8)
 	for i := range fields {
 		value, err := c.u16()
 		if err != nil {
-			return nil, catalog, err
+			return catalog, err
 		}
 		fields[i] = value
 	}
@@ -152,7 +144,7 @@ func parseCatalog(input []byte) ([]byte, CatalogChunk, error) {
 
 	earliestFirehoseTimestamp, err := c.u64()
 	if err != nil {
-		return nil, catalog, err
+		return catalog, err
 	}
 	// All offsets start after the earliest firehose timestamp
 
@@ -163,7 +155,7 @@ func parseCatalog(input []byte) ([]byte, CatalogChunk, error) {
 	for i := 0; i < numberCatalogUUIDs; i++ {
 		value, err := c.u128be()
 		if err != nil {
-			return nil, catalog, err
+			return catalog, err
 		}
 		catalogUUIDs = append(catalogUUIDs, u128Hex(value))
 	}
@@ -171,15 +163,15 @@ func parseCatalog(input []byte) ([]byte, CatalogChunk, error) {
 	subsystemsStringsLength := int(catalogProcessInfoEntriesOffset) - int(catalogSubsystemStringsOffset)
 	subsystemStringsData, err := c.take(subsystemsStringsLength)
 	if err != nil {
-		return nil, catalog, err
+		return catalog, err
 	}
 	catalogSubsystemStrings := append([]byte{}, subsystemStringsData...)
 
 	processInfoEntriesVec := make([]ProcessInfoEntry, 0, numberProcessInformationEntries)
 	for i := 0; i < int(numberProcessInformationEntries); i++ {
-		entry, err := parseCatalogProcessEntry(c, catalogUUIDs)
+		entry, err := parseCatalogProcessEntry(c, catalogUUIDs, logger)
 		if err != nil {
-			return nil, catalog, err
+			return catalog, err
 		}
 		processInfoEntriesVec = append(processInfoEntriesVec, entry)
 	}
@@ -197,21 +189,21 @@ func parseCatalog(input []byte) ([]byte, CatalogChunk, error) {
 		personaDataSize := int(catalogOffsetSubChunks) - int(personaOffset)
 		personaData, err := c.take(personaDataSize)
 		if err != nil {
-			return nil, catalog, err
+			return catalog, err
 		}
 
-		parsedPersonas, err := parseCatalogPersona(personaData, personaCount)
+		parsedPersonas, err := parseCatalogPersona(personaData, personaCount, logger)
 		if err != nil {
-			return nil, catalog, err
+			return catalog, err
 		}
 		personas = parsedPersonas
 	}
 
 	catalogSubchunks := make([]CatalogSubchunk, 0, numberSubChunks)
 	for i := 0; i < int(numberSubChunks); i++ {
-		subchunk, err := parseCatalogSubchunk(c)
+		subchunk, err := parseCatalogSubchunk(c, logger)
 		if err != nil {
-			return nil, catalog, err
+			return catalog, err
 		}
 		catalogSubchunks = append(catalogSubchunks, subchunk)
 	}
@@ -235,11 +227,12 @@ func parseCatalog(input []byte) ([]byte, CatalogChunk, error) {
 		CatalogSubchunks:                catalogSubchunks,
 	}
 
-	return c.rest(), catalog, nil
+	return catalog, nil
 }
 
 // parseCatalogProcessEntry parses the Catalog Process Information entry.
-func parseCatalogProcessEntry(c *cursor, uuids []string) (ProcessInfoEntry, error) {
+func parseCatalogProcessEntry(c *ReadCursor,
+	uuids []string, logger *Logger) (ProcessInfoEntry, error) {
 	var entry ProcessInfoEntry
 
 	index, err := c.u16()
@@ -325,7 +318,7 @@ func parseCatalogProcessEntry(c *cursor, uuids []string) (ProcessInfoEntry, erro
 	if int(catalogMainUUIDIndex) < len(uuids) {
 		mainUUID = uuids[catalogMainUUIDIndex]
 	} else {
-		logger.Printf("[macos-unifiedlogs] Could not find main UUID in catalog")
+		logger.Printf(" Could not find main UUID in catalog")
 	}
 
 	dscUUID := ""
@@ -337,7 +330,7 @@ func parseCatalogProcessEntry(c *cursor, uuids []string) (ProcessInfoEntry, erro
 	padding := anticipatedPaddingSize8(uint64(numberSubsystems), subsystemSize)
 	paddingInt, ok := u64ToUint(padding)
 	if !ok {
-		logger.Printf("[macos-unifiedlogs] u64 is bigger than system usize")
+		logger.Printf("u64 is bigger than system usize")
 		return entry, ErrTooLarge
 	}
 	if err := c.skip(paddingInt); err != nil {
@@ -369,7 +362,8 @@ func parseCatalogProcessEntry(c *cursor, uuids []string) (ProcessInfoEntry, erro
 // parseProcessInfoUUIDEntry parses the UUID metadata in the Catalog Process
 // Entry (the Catalog Process Entry references the UUIDs array parsed in
 // `parseCatalog` by index value).
-func parseProcessInfoUUIDEntry(c *cursor, uuids []string) (ProcessUUIDEntry, error) {
+func parseProcessInfoUUIDEntry(
+	c *ReadCursor, uuids []string) (ProcessUUIDEntry, error) {
 	var entry ProcessUUIDEntry
 
 	size, err := c.u32()
@@ -411,7 +405,7 @@ func parseProcessInfoUUIDEntry(c *cursor, uuids []string) (ProcessUUIDEntry, err
 
 // parseProcessInfoSubystem parses the Catalog Subsystem metadata. This helps
 // get the subsystem (App Bundle ID) and the log entry category.
-func parseProcessInfoSubystem(c *cursor) (ProcessInfoSubsystem, error) {
+func parseProcessInfoSubystem(c *ReadCursor) (ProcessInfoSubsystem, error) {
 	var subsystem ProcessInfoSubsystem
 
 	identifier, err := c.u16()
@@ -437,7 +431,8 @@ func parseProcessInfoSubystem(c *cursor) (ProcessInfoSubsystem, error) {
 
 // parseCatalogPersona parses the new Catalog section data added in Golden Gate
 // and iOS 27. This may match with Kernel Persona info from the umtool.
-func parseCatalogPersona(data []byte, count uint16) ([]CatalogPersona, error) {
+func parseCatalogPersona(data []byte,
+	count uint16, logger *Logger) ([]CatalogPersona, error) {
 	c := newCursor(data)
 	personaDataCount := uint16(0)
 
@@ -478,7 +473,7 @@ func parseCatalogPersona(data []byte, count uint16) ([]CatalogPersona, error) {
 	paddingSize := paddingSize8(uint64(count) * personaHeaderSize)
 	paddingSizeInt, ok := u64ToUint(paddingSize)
 	if !ok {
-		logger.Printf("[macos-unifiedlogs] u64 is bigger than system usize")
+		logger.Printf(" u64 is bigger than system usize")
 		return nil, ErrTooLarge
 	}
 	if err := c.skip(paddingSizeInt); err != nil {
@@ -495,19 +490,19 @@ func parseCatalogPersona(data []byte, count uint16) ([]CatalogPersona, error) {
 		if err != nil {
 			return nil, err
 		}
-		_, uuid, err := extractString(uuidData)
+		_, uuid, err := extractString(uuidData, logger)
 		if err != nil {
 			return nil, err
 		}
 
 		personas[i].UUID = uuid
-		logger.Printf("Persona info: '%+v'", personas[i])
+		logger.Debugf("Persona info: '%+v'", personas[i])
 	}
 
 	paddingSize = paddingSize8(uint64(count) * uuidStringSize)
 	paddingSizeInt, ok = u64ToUint(paddingSize)
 	if !ok {
-		logger.Printf("[macos-unifiedlogs] u64 is bigger than system usize")
+		logger.Printf(" u64 is bigger than system usize")
 		return nil, ErrTooLarge
 	}
 	if err := c.skip(paddingSizeInt); err != nil {
@@ -519,7 +514,7 @@ func parseCatalogPersona(data []byte, count uint16) ([]CatalogPersona, error) {
 
 // parseCatalogSubchunk parses the Catalog Subchunk metadata. This metadata is
 // related to the compressed (typically) Chunkset data.
-func parseCatalogSubchunk(c *cursor) (CatalogSubchunk, error) {
+func parseCatalogSubchunk(c *ReadCursor, logger *Logger) (CatalogSubchunk, error) {
 	var subchunk CatalogSubchunk
 
 	start, err := c.u64()
@@ -547,7 +542,7 @@ func parseCatalogSubchunk(c *cursor) (CatalogSubchunk, error) {
 	lzbitmapCompression := [2]uint32{1792, 1793}
 	if compressionAlgorithm != lz4Compression &&
 		!(compressionAlgorithm == lzbitmapCompression[0] || compressionAlgorithm == lzbitmapCompression[1]) {
-		logger.Printf("[macos-unifiedlogs] Unexpected compression aglorithm: %d", compressionAlgorithm)
+		logger.Printf(" Unexpected compression aglorithm: %d", compressionAlgorithm)
 		return subchunk, ErrFail
 	}
 
@@ -579,7 +574,7 @@ func parseCatalogSubchunk(c *cursor) (CatalogSubchunk, error) {
 	padding := anticipatedPaddingSize8(uint64(numberIndex)+uint64(numberStringOffsets), offsetSize)
 	paddingInt, ok := u64ToUint(padding)
 	if !ok {
-		logger.Printf("[macos-unifiedlogs] u64 is bigger than system usize")
+		logger.Printf(" u64 is bigger than system usize")
 		return subchunk, ErrTooLarge
 	}
 	if err := c.skip(paddingInt); err != nil {
@@ -602,7 +597,9 @@ func parseCatalogSubchunk(c *cursor) (CatalogSubchunk, error) {
 // GetSubsystem gets the subsystem and category based on the log entry
 // `first_proc_id`, `second_proc_id`, log entry subsystem id and the associated
 // Catalog.
-func (catalog *CatalogChunk) GetSubsystem(subsystemValue uint16, firstProcID uint64, secondProcID uint32) (SubsystemInfo, error) {
+func (catalog *CatalogChunk) GetSubsystem(
+	subsystemValue uint16, firstProcID uint64,
+	secondProcID uint32, logger *Logger) (SubsystemInfo, error) {
 	var subsystemInfo SubsystemInfo
 
 	key := fmt.Sprintf("%d_%d", firstProcID, secondProcID)
@@ -615,7 +612,8 @@ func (catalog *CatalogChunk) GetSubsystem(subsystemValue uint16, firstProcID uin
 				if err := subsystemCursor.skip(int(subsystems.SubsystemOffset)); err != nil {
 					return subsystemInfo, err
 				}
-				_, subsystemString, err := extractString(subsystemCursor.rest())
+				_, subsystemString, err := extractString(
+					subsystemCursor.rest(), logger)
 				if err != nil {
 					return subsystemInfo, err
 				}
@@ -624,7 +622,8 @@ func (catalog *CatalogChunk) GetSubsystem(subsystemValue uint16, firstProcID uin
 				if err := categoryCursor.skip(int(subsystems.CategoryOffset)); err != nil {
 					return subsystemInfo, err
 				}
-				_, categoryString, err := extractString(categoryCursor.rest())
+				_, categoryString, err := extractString(
+					categoryCursor.rest(), logger)
 				if err != nil {
 					return subsystemInfo, err
 				}
@@ -641,24 +640,28 @@ func (catalog *CatalogChunk) GetSubsystem(subsystemValue uint16, firstProcID uin
 }
 
 // GetPID gets the actual Process ID associated with log entry.
-func (catalog *CatalogChunk) GetPID(firstProcID uint64, secondProcID uint32) uint64 {
+func (catalog *CatalogChunk) GetPID(firstProcID uint64,
+	secondProcID uint32, logger *Logger) uint64 {
 	key := fmt.Sprintf("%d_%d", firstProcID, secondProcID)
 	if entry, ok := catalog.CatalogProcessInfoEntries[key]; ok {
 		return uint64(entry.PID)
 	}
 
-	logger.Printf("[macos-unifiedlogs] Did not find PID in log Catalog")
+	logger.Printf(" Did not find PID %d_%d in log Catalog",
+		firstProcID, secondProcID)
 	return 0
 }
 
 // GetEUID gets the effective user id associated with log entry. Can be mapped
 // to an account name.
-func (catalog *CatalogChunk) GetEUID(firstProcID uint64, secondProcID uint32) uint32 {
+func (catalog *CatalogChunk) GetEUID(
+	firstProcID uint64, secondProcID uint32, logger *Logger) uint32 {
 	key := fmt.Sprintf("%d_%d", firstProcID, secondProcID)
 	if entry, ok := catalog.CatalogProcessInfoEntries[key]; ok {
 		return entry.EffectiveUserID
 	}
 
-	logger.Printf("[macos-unifiedlogs] Did not find EUID in log Catalog")
+	logger.Printf(" Did not find EUID %d_%d in log Catalog",
+		firstProcID, secondProcID)
 	return 0
 }

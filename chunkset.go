@@ -9,6 +9,7 @@ package unifiedlogs
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/pierrec/lz4/v4"
 )
@@ -27,33 +28,19 @@ type ChunksetChunk struct {
 }
 
 // ParseChunkset parses the Chunkset data that contains the actual log entries.
-func ParseChunkset(data []byte) ([]byte, ChunksetChunk, error) {
+func ParseChunkset(c *ReadCursor,
+	preamble *LogPreamble,
+	logger *Logger) (ChunksetChunk, error) {
 	var chunksetChunk ChunksetChunk
 
-	c := newCursor(data)
-	chunksetChunkTag, err := c.u32()
-	if err != nil {
-		return nil, chunksetChunk, err
-	}
-	chunksetChunkSubTag, err := c.u32()
-	if err != nil {
-		return nil, chunksetChunk, err
-	}
-	chunksetChunkDataSize, err := c.u64()
-	if err != nil {
-		return nil, chunksetChunk, err
-	}
-
 	// chunk_input is the input starting at the compression signature.
-	chunkInput := c.rest()
-
 	chunksetSig, err := c.u32()
 	if err != nil {
-		return nil, chunksetChunk, err
+		return chunksetChunk, err
 	}
 	chunksetUncompressSize, err := c.u32()
 	if err != nil {
-		return nil, chunksetChunk, err
+		return chunksetChunk, err
 	}
 
 	const bv41 = 825521762             // bv41 signature
@@ -63,155 +50,150 @@ func ParseChunkset(data []byte) ([]byte, ChunksetChunk, error) {
 	if chunksetSig == bv41Uncompressed {
 		uncompressedData, err := c.take(int(chunksetUncompressSize))
 		if err != nil {
-			return nil, chunksetChunk, err
+			return chunksetChunk, err
 		}
 		chunksetChunk.DecompressedData = uncompressedData
 		chunksetFooter, err := c.u32()
 		if err != nil {
-			return nil, chunksetChunk, err
+			return chunksetChunk, err
 		}
 		chunksetChunk.Footer = chunksetFooter
-		return c.rest(), chunksetChunk, nil
+		return chunksetChunk, nil
 	}
 
 	// Only two likely to exist
 	lzbitmapSigs := []uint32{206389850, 156058202, 223167066, 139280986}
 	if containsU32(lzbitmapSigs, chunksetSig) {
-		remaining, decomBytes, err := lzbitmapDecompressRemaining(chunkInput)
+		decomBytes, err := lzbitmapDecompressRemaining(c, logger)
 		if err != nil {
-			return nil, chunksetChunk, err
+			return chunksetChunk, err
 		}
 		// Always [6, 0, 0, 0, 0, 0]?
 		// Maybe its a version number?
-		fc := newCursor(remaining)
-		chunksetFooter, err := fc.u32()
+		chunksetFooter, err := c.u32()
 		if err != nil {
-			return nil, chunksetChunk, err
+			return chunksetChunk, err
 		}
 
 		chunksetChunk.DecompressedData = decomBytes
 		chunksetChunk.Footer = chunksetFooter
 
-		return fc.rest(), chunksetChunk, nil
+		return chunksetChunk, nil
 	}
 
 	// Compressed data signature should be bv41
 	if chunksetSig != bv41 {
-		logger.Printf("[macos-unifiedlogs] Incorrect compression signature expected bv41, got: %v", chunksetSig)
-		return nil, chunksetChunk, ErrIncomplete
+		logger.Printf(" Incorrect compression signature expected bv41, got: %v", chunksetSig)
+		return chunksetChunk, ErrIncomplete
 	}
 
 	chunksetBlockSize, err := c.u32()
 	if err != nil {
-		return nil, chunksetChunk, err
+		return chunksetChunk, err
 	}
 
-	chunksetChunk.ChunkTag = chunksetChunkTag
-	chunksetChunk.ChunkSubTag = chunksetChunkSubTag
-	chunksetChunk.ChunkDataSize = chunksetChunkDataSize
+	chunksetChunk.ChunkTag = preamble.ChunkTag
+	chunksetChunk.ChunkSubTag = preamble.ChunkSubTag
+	chunksetChunk.ChunkDataSize = preamble.ChunkDataSize
 	chunksetChunk.Signature = chunksetSig
 	chunksetChunk.UncompressSize = chunksetUncompressSize
 	chunksetChunk.BlockSize = chunksetBlockSize
 
 	compressedData, err := c.take(int(chunksetBlockSize))
 	if err != nil {
-		return nil, chunksetChunk, err
+		return chunksetChunk, err
 	}
 
 	// The decompressed data contains multiple log entries
 	decompressedData := make([]byte, chunksetUncompressSize)
 	if _, err := lz4.UncompressBlock(compressedData, decompressedData); err != nil {
-		logger.Printf("[macos-unifiedlogs] Failed to decompress log data: %v", err)
-		return nil, chunksetChunk, ErrIncomplete
+		logger.Printf(" Failed to decompress log data: %v", err)
+		return chunksetChunk, ErrIncomplete
 	}
 	chunksetChunk.DecompressedData = decompressedData
 
 	chunksetFooter, err := c.u32()
 	if err != nil {
-		return nil, chunksetChunk, err
+		return chunksetChunk, err
 	}
 	chunksetChunk.Footer = chunksetFooter
 
-	return c.rest(), chunksetChunk, nil
+	return chunksetChunk, nil
 }
 
 // ParseChunksetData parses each log (chunk) in the decompressed Chunkset data.
-func ParseChunksetData(data []byte, unifiedLogData *UnifiedLogCatalogData) ([]byte, error) {
-	c := newCursor(data)
+func ParseChunksetData(c *ReadCursor,
+	unifiedLogData *UnifiedLogCatalogData,
+	logger *Logger) error {
 	const chunkPreambleSize = 16 // Include preamble size in total chunk size
 
 	// Loop through decompressed chunkset data until all log entries (chunks) are read
-	for !c.isEmpty() {
-		preamble, err := detectPreamble(c.rest())
+	for {
+		preamble, err := parsePreamble(c)
+		if err == io.EOF {
+			return nil
+		}
 		if err != nil {
-			return nil, err
+			return err
 		}
 		chunkSize := preamble.ChunkDataSize
 
 		// Grab all data associated with log (chunk) data
 		chunkSizeInt, ok := u64ToUint(chunkSize)
 		if !ok {
-			logger.Printf("[macos-unifiedlogs] u64 is bigger than system usize")
-			return nil, fmt.Errorf("chunk size too large: %w", ErrTooLarge)
+			logger.Printf("chunk size too large: %v", ErrTooLarge)
+			return fmt.Errorf("chunk size too large: %w", ErrTooLarge)
 		}
-		chunkData, err := c.take(chunkSizeInt + chunkPreambleSize)
+		chunkData, err := c.take(chunkSizeInt)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		getChunksetData(chunkData, preamble.ChunkTag, unifiedLogData)
+		getChunksetData(chunkData, preamble, unifiedLogData, logger)
 
-		// Nom all zero padding
-		c.takeWhile(func(b byte) bool { return b == 0 })
-		if c.remaining() == 0 {
-			break
-		}
-
-		if c.remaining() < chunkPreambleSize {
-			logger.Printf("[macos-unifiedlogs] Not enough data for Chunkset preamble header, needed 16 bytes. Got: %d", c.remaining())
-			break
+		err = c.read_bytes(0)
+		if err != nil && err != io.EOF {
+			return err
 		}
 	}
-	return c.rest(), nil
+	return nil
 }
 
 // getChunksetData parses the log entry (chunk) chunk based on type.
-func getChunksetData(data []byte, chunkType uint32, unifiedLogData *UnifiedLogCatalogData) {
-	const firehoseChunk = 0x6001
-	const oversizeChunk = 0x6002
-	const statedumpChunk = 0x6003
-	const simpledumpChunk = 0x6004
+func getChunksetData(data []byte,
+	preamble *LogPreamble,
+	unifiedLogData *UnifiedLogCatalogData, logger *Logger) {
 
-	switch chunkType {
+	switch preamble.ChunkTag {
 	case firehoseChunk:
-		_, firehoseData, err := parseFirehosePreamble(data)
+		firehoseData, err := parseFirehosePreamble(data, preamble, logger)
 		if err != nil {
-			logger.Printf("[macos-unifiedlogs] Failed to parse firehose log entry (chunk): %v", err)
+			logger.Printf(" Failed to parse firehose log entry (chunk): %v", err)
 			return
 		}
 		unifiedLogData.Firehose = append(unifiedLogData.Firehose, *firehoseData)
 	case oversizeChunk:
-		_, oversize, err := parseOversize(data)
+		oversize, err := parseOversize(data, preamble, logger)
 		if err != nil {
-			logger.Printf("[macos-unifiedlogs] Failed to parse oversize log entry (chunk): %v", err)
+			logger.Printf(" Failed to parse oversize log entry (chunk): %v", err)
 			return
 		}
 		unifiedLogData.Oversize = append(unifiedLogData.Oversize, oversize)
 	case statedumpChunk:
-		_, statedump, err := ParseStatedump(data)
+		statedump, err := ParseStatedump(data, preamble, logger)
 		if err != nil {
-			logger.Printf("[macos-unifiedlogs] Failed to parse statedump log entry (chunk): %v", err)
+			logger.Printf(" Failed to parse statedump log entry (chunk): %v", err)
 			return
 		}
 		unifiedLogData.Statedump = append(unifiedLogData.Statedump, statedump)
 	case simpledumpChunk:
-		_, simpledump, err := parseSimpledump(data)
+		simpledump, err := parseSimpledump(data, preamble, logger)
 		if err != nil {
-			logger.Printf("[macos-unifiedlogs] Failed to parse simpledump log entry (chunk): %v", err)
+			logger.Printf(" Failed to parse simpledump log entry (chunk): %v", err)
 			return
 		}
 		unifiedLogData.Simpledump = append(unifiedLogData.Simpledump, simpledump)
 	default:
-		logger.Printf("[macos-unifiedlogs] Unknown chunkset type: %v", chunkType)
+		logger.Printf(" Unknown chunkset type: %v", preamble.ChunkTag)
 	}
 }
 

@@ -14,8 +14,18 @@ import (
 	"testing"
 )
 
-// requireTestData reads a file under tests/test_data and skips the test when the
+// requireTestReadCursor reads a file under tests/test_data and skips the test when the
 // reference logarchive data (test_data.zip from the GitHub release) is not present.
+func requireTestReadCursor(t *testing.T, rel string) *ReadCursor {
+	t.Helper()
+	path := filepath.Join("tests", "test_data", filepath.FromSlash(rel))
+	fd, err := os.Open(path)
+	if err != nil {
+		t.Skipf("test data %q not available (download test_data.zip from the GitHub release): %v", path, err)
+	}
+	return NewReadCursor(fd)
+}
+
 func requireTestData(t *testing.T, rel string) []byte {
 	t.Helper()
 	path := filepath.Join("tests", "test_data", filepath.FromSlash(rel))

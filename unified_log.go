@@ -12,8 +12,10 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"time"
 
-	"github.com/predictiple/go-macos-unifiedlogs/internal/sunlight"
+	"github.com/Velocidex/go-macos-unifiedlogs/internal/sunlight"
 )
 
 // LogType is the log type of a parsed firehose log entry.
@@ -77,95 +79,101 @@ type UnifiedLogCatalogData struct {
 
 // LogData is a single parsed Unified Log entry.
 type LogData struct {
-	Subsystem        string             `json:"subsystem"`
-	ThreadID         uint64             `json:"thread_id"`
-	PID              uint64             `json:"pid"`
-	EUID             uint32             `json:"euid"`
-	Library          string             `json:"library"`
-	LibraryUUID      string             `json:"library_uuid"`
-	ActivityID       uint64             `json:"activity_id"`
-	ParentActivityID uint64             `json:"parent_activity_id"`
-	Time             float64            `json:"time"`
-	Category         string             `json:"category"`
-	EventType        EventType          `json:"event_type"`
-	LogType          LogType            `json:"log_type"`
-	Process          string             `json:"process"`
-	ProcessUUID      string             `json:"process_uuid"`
-	Message          string             `json:"message"`
-	RawMessage       string             `json:"raw_message"`
-	BootUUID         string             `json:"boot_uuid"`
-	TimezoneName     string             `json:"timezone_name"`
-	MessageEntries   []FirehoseItemType `json:"message_entries"`
-	Timestamp        string             `json:"timestamp"`
-	MessageFlags     []MessageFlags     `json:"message_flags"`
-	Evidence         string             `json:"evidence"`
+	Time             time.Time `json:"Time"`
+	Subsystem        string    `json:"Subsystem"`
+	ThreadID         uint64    `json:"ThreadID"`
+	PID              uint64    `json:"PID"`
+	EUID             uint32    `json:"EUID"`
+	Library          string    `json:"Library"`
+	LibraryUUID      string    `json:"LibraryUUID"`
+	ActivityID       uint64    `json:"ActivityID"`
+	ParentActivityID uint64    `json:"ParentActivityID"`
+	Category         string    `json:"Category"`
+	EventType        string    `json:"EventType"`
+	LogType          string    `json:"LogType"`
+	Process          string    `json:"Process"`
+	ProcessUUID      string    `json:"ProcessUUID"`
+	Message          string    `json:"Message"`
+	RawMessage       string    `json:"RawMessage"`
+	BootUUID         string    `json:"BootUUID"`
+	TimezoneName     string    `json:"TimezoneName"`
+	MessageFlags     []string  `json:"MessageFlags"`
+	Evidence         string    `json:"Evidence"`
+
+	// Private member exposed through MessageStrings()
+	_MessageEntries []FirehoseItemType `json:"-"`
+}
+
+func (self *LogData) MessageStrings() (res []string) {
+	res = []string{}
+	for _, e := range self._MessageEntries {
+		res = append(res, e.MessageStrings)
+	}
+	return res
 }
 
 // parseUnifiedLog parses the Unified log data read from a tracev3 file.
-func parseUnifiedLog(data []byte, evidence string) ([]byte, *UnifiedLogData, error) {
+func parseUnifiedLog(
+	c *ReadCursor,
+	evidence string, logger *Logger) (*UnifiedLogData, error) {
 	unifiedLogData := &UnifiedLogData{
 		Evidence: evidence,
 	}
 
 	catalogData := UnifiedLogCatalogData{}
 
-	input := data
-	const chunkPreambleSize = 16 // Include preamble size in total chunk size
-
-	const headerChunk = 0x1000
-	const catalogChunk = 0x600b
-	const chunksetChunk = 0x600d
-
 	// Loop through traceV3 file until all file contents are read
-	for len(input) != 0 {
-		preamble, err := detectPreamble(input)
+	for {
+		offset := uint64(c.Tell())
+
+		preamble, err := parsePreamble(c)
 		if err != nil {
-			return nil, nil, err
+			break
 		}
+
 		chunkSize := preamble.ChunkDataSize
 
 		// Check for overflow/wrap in chunk size
 		if chunkSize > ^uint64(0)-chunkPreambleSize {
-			return nil, nil, ErrTooLarge
+			// Return as much data as we can when we hit an error.
+			logger.Printf("While parsing %v: chunkSize too large %v",
+				evidence, chunkSize)
+			return nil, ErrTooLarge
 		}
-
-		// Grab all data associated with Unified Log entry (chunk)
-		if uint64(len(input)) < chunkSize+chunkPreambleSize {
-			return nil, nil, ErrTooLarge
-		}
-		chunkData := input[:chunkSize+chunkPreambleSize]
-		data = input[chunkSize+chunkPreambleSize:]
 
 		switch preamble.ChunkTag {
 		case headerChunk:
-			getHeaderData(chunkData, unifiedLogData)
+			getHeaderData(c, preamble, unifiedLogData, logger)
+
 		case catalogChunk:
 			if catalogData.Catalog.ChunkTag != 0 {
 				unifiedLogData.CatalogData = append(unifiedLogData.CatalogData, catalogData)
 			}
 			catalogData = UnifiedLogCatalogData{}
-			getCatalogData(chunkData, &catalogData)
+			getCatalogData(c, preamble, &catalogData, logger)
+
 		case chunksetChunk:
-			getChunksetLogData(chunkData, &catalogData, unifiedLogData)
+			getChunksetLogData(
+				c, preamble, &catalogData, unifiedLogData, logger)
+
 		default:
-			logger.Printf("[macos-unifiedlogs] Unknown chunk type: %v", preamble.ChunkTag)
+			logger.Printf(" Unknown chunk type: %v", preamble.ChunkTag)
 		}
 
+		// Skip to the next chunk
 		paddingSize := paddingSize8(preamble.ChunkDataSize)
-		if uint64(len(data)) < paddingSize {
+		next_offset := paddingSize + offset + preamble.ChunkDataSize + chunkPreambleSize
+		current_offset := uint64(c.Tell())
+
+		// Should not really happen - we can not really go backwards.
+		if current_offset > next_offset {
+			c.Pos(int64(next_offset))
 			break
-		}
-		nextData := data[paddingSize:]
-		if len(nextData) == 0 {
-			break
-		}
-		if len(nextData) == len(input) {
-			break
-		}
-		input = nextData
-		if len(input) < chunkPreambleSize {
-			logger.Printf("Not enough data for preamble header, needed 16 bytes. Got: %d", len(input))
-			break
+		} else if next_offset > current_offset {
+			err = c.skip(int(next_offset - current_offset))
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -174,7 +182,7 @@ func parseUnifiedLog(data []byte, evidence string) ([]byte, *UnifiedLogData, err
 		unifiedLogData.CatalogData = append(unifiedLogData.CatalogData, catalogData)
 	}
 
-	return data, unifiedLogData, nil
+	return unifiedLogData, nil
 }
 
 // BuildLog reconstructs Unified Log entries using the binary strings data,
@@ -182,12 +190,11 @@ func parseUnifiedLog(data []byte, evidence string) ([]byte, *UnifiedLogData, err
 // true, log entries that cannot be reconstructed (data in additional tracev3
 // files) are skipped. It returns the reconstructed log entries and any leftover
 // Unified Log entries that could not be reconstructed.
-func BuildLog(unifiedLogData *UnifiedLogData, provider FileProvider, cache StringCache, timesyncData map[string]*TimesyncBoot, excludeMissing bool) ([]LogData, UnifiedLogData) {
-	return buildLog(unifiedLogData, provider, cache, timesyncData, excludeMissing)
-}
+func (self *UnifiedLogParser) BuildLog(unifiedLogData *UnifiedLogData,
+	timesyncData map[string]*TimesyncBoot,
+	excludeMissing bool) ([]LogData, UnifiedLogData) {
 
-// buildLog builds the reconstructed LogData entries from parsed UnifiedLogData.
-func buildLog(unifiedLogData *UnifiedLogData, provider FileProvider, cache StringCache, timesyncData map[string]*TimesyncBoot, excludeMissing bool) ([]LogData, UnifiedLogData) {
+	logger := self.logger
 	logDataVec := []LogData{}
 	// Need to keep track of any log entries that fail to find Oversize strings
 	// (sometimes the strings may be in other log files that have not been parsed yet)
@@ -201,7 +208,8 @@ func buildLog(unifiedLogData *UnifiedLogData, provider FileProvider, cache Strin
 		// Parse the firehose (log) entries
 		for preambleIndex, preamble := range catalogData.Firehose {
 			for firehoseIndex, firehose := range preamble.PublicData {
-				// The continous time is actually 6 bytes long. Combining 4 bytes and 2 bytes
+				// The continous time is actually 6 bytes
+				// long. Combining 4 bytes and 2 bytes
 				firehoseLogEntryContinousTime := uint64(firehose.ContinousTimeDelta) | (uint64(firehose.ContinousTimeDeltaUpper) << 32)
 				continousTime := preamble.BaseContinousTime + firehoseLogEntryContinousTime
 
@@ -217,17 +225,20 @@ func buildLog(unifiedLogData *UnifiedLogData, provider FileProvider, cache Strin
 
 				// Our struct format to hold and show the log data
 				logData := LogData{
-					ThreadID:       firehose.ThreadID,
-					PID:            catalogData.Catalog.GetPID(preamble.FirstNumberProcID, preamble.SecondNumberProcID),
-					Time:           timestamp,
-					Timestamp:      unixEpochToISO(int64(timestamp)),
-					LogType:        getLogType(firehose.LogType, firehose.LogActivityType),
-					EventType:      getEventType(firehose.LogActivityType),
-					EUID:           catalogData.Catalog.GetEUID(preamble.FirstNumberProcID, preamble.SecondNumberProcID),
-					BootUUID:       bootUUID,
-					TimezoneName:   timezoneName,
-					MessageEntries: firehose.Message.ItemInfo,
-					Evidence:       unifiedLogData.Evidence,
+					ThreadID: firehose.ThreadID,
+					PID: catalogData.Catalog.GetPID(
+						preamble.FirstNumberProcID,
+						preamble.SecondNumberProcID, logger),
+					Time:      time.Unix(0, timestamp).UTC(),
+					LogType:   string(getLogType(firehose.LogType, firehose.LogActivityType)),
+					EventType: string(getEventType(firehose.LogActivityType)),
+					EUID: catalogData.Catalog.GetEUID(
+						preamble.FirstNumberProcID,
+						preamble.SecondNumberProcID, logger),
+					BootUUID:        bootUUID,
+					TimezoneName:    timezoneName,
+					_MessageEntries: firehose.Message.ItemInfo,
+					Evidence:        unifiedLogData.Evidence,
 				}
 
 				// 0x4 - Non-activity log entry. Ex: log default, log error, etc
@@ -240,14 +251,14 @@ func buildLog(unifiedLogData *UnifiedLogData, provider FileProvider, cache Strin
 					logData.ActivityID = uint64(firehose.FirehoseNonActivity.ActivityID)
 					_, messageData, err := getFirehoseNonactivityStrings(
 						&firehose.FirehoseNonActivity,
-						provider,
-						cache,
+						self.provider,
+						self.cache,
 						uint64(firehose.FormatStringLocation),
 						preamble.FirstNumberProcID,
 						preamble.SecondNumberProcID,
 						&catalogData.Catalog,
 					)
-					logData.MessageFlags = firehose.FirehoseNonActivity.Flags
+					logData.MessageFlags = convertToStrings(firehose.FirehoseActivity.Flags)
 					if err == nil {
 						logData.Library = messageData.Library
 						logData.LibraryUUID = messageData.LibraryUUID
@@ -263,17 +274,23 @@ func buildLog(unifiedLogData *UnifiedLogData, provider FileProvider, cache Strin
 								firehose.FirehoseNonActivity.DataRefValue,
 								preamble.FirstNumberProcID,
 								preamble.SecondNumberProcID,
-								unifiedLogData.Oversize,
+								unifiedLogData.Oversize, logger,
 							)
-							logMessage = FormatFirehoseLogMessage(messageData.FormatString, oversizeStrings, firehoseMessageRegex)
+							logMessage = self.message_formatter.FormatFirehoseLogMessage(
+								messageData.FormatString,
+								oversizeStrings)
 						} else {
-							logMessage = FormatFirehoseLogMessage(messageData.FormatString, firehose.Message.ItemInfo, firehoseMessageRegex)
+							logMessage = self.message_formatter.FormatFirehoseLogMessage(
+								messageData.FormatString,
+								firehose.Message.ItemInfo)
 						}
 
 						// If we are tracking missing data (due to it being stored in
 						// another log file), add missing data to track and parse again.
 						if excludeMissing && strings.Contains(logMessage, "<Missing message data>") {
-							addMissing(catalogData, preambleIndex, firehoseIndex, unifiedLogData.Header, &missingUnifiedLogData, preamble)
+							addMissing(catalogData, preambleIndex,
+								firehoseIndex, unifiedLogData.Header,
+								&missingUnifiedLogData, preamble)
 							continue
 						}
 
@@ -283,7 +300,7 @@ func buildLog(unifiedLogData *UnifiedLogData, provider FileProvider, cache Strin
 							logData.Message = logMessage
 						}
 					} else {
-						logger.Printf("[macos-unifiedlogs] Failed to get message string data for firehose non-activity log entry: %v", err)
+						logger.Printf(" Failed to get message string data for firehose non-activity log entry: %v", err)
 					}
 
 					if firehose.FirehoseNonActivity.SubsystemValue != 0 {
@@ -291,18 +308,19 @@ func buildLog(unifiedLogData *UnifiedLogData, provider FileProvider, cache Strin
 							firehose.FirehoseNonActivity.SubsystemValue,
 							preamble.FirstNumberProcID,
 							preamble.SecondNumberProcID,
+							logger,
 						)
 						if err == nil {
 							logData.Subsystem = subsystem.Subsystem
 							logData.Category = subsystem.Category
 						} else {
-							logger.Printf("[macos-unifiedlogs] Failed to get subsystem: %v", err)
+							logger.Printf(" Failed to get subsystem: %v", err)
 						}
 					}
 				case 0x7:
 					// No message data in loss entries
-					logData.EventType = EventTypeLoss
-					logData.LogType = LogTypeLoss
+					logData.EventType = string(EventTypeLoss)
+					logData.LogType = string(LogTypeLoss)
 				case 0x2:
 					// When has_other_current_aid (0x200) is set, id3 is the new
 					// activity and id1 is the parent. Otherwise id1 is the new
@@ -313,11 +331,13 @@ func buildLog(unifiedLogData *UnifiedLogData, provider FileProvider, cache Strin
 					} else {
 						logData.ActivityID = uint64(firehose.FirehoseActivity.ActivityID)
 					}
-					logData.MessageFlags = firehose.FirehoseActivity.Flags
+
+					// Coerce to string
+					logData.MessageFlags = convertToStrings(firehose.FirehoseActivity.Flags)
 					_, messageData, err := getFirehoseActivityStrings(
 						&firehose.FirehoseActivity,
-						provider,
-						cache,
+						self.provider,
+						self.cache,
 						uint64(firehose.FormatStringLocation),
 						preamble.FirstNumberProcID,
 						preamble.SecondNumberProcID,
@@ -330,8 +350,12 @@ func buildLog(unifiedLogData *UnifiedLogData, provider FileProvider, cache Strin
 						logData.ProcessUUID = messageData.ProcessUUID
 						logData.RawMessage = messageData.FormatString
 
-						logMessage := FormatFirehoseLogMessage(messageData.FormatString, firehose.Message.ItemInfo, firehoseMessageRegex)
-						if excludeMissing && strings.Contains(logMessage, "<Missing message data>") {
+						logMessage := self.message_formatter.FormatFirehoseLogMessage(
+							messageData.FormatString,
+							firehose.Message.ItemInfo,
+						)
+						if excludeMissing && strings.Contains(
+							logMessage, "<Missing message data>") {
 							addMissing(catalogData, preambleIndex, firehoseIndex, unifiedLogData.Header, &missingUnifiedLogData, preamble)
 							continue
 						}
@@ -341,15 +365,15 @@ func buildLog(unifiedLogData *UnifiedLogData, provider FileProvider, cache Strin
 							logData.Message = logMessage
 						}
 					} else {
-						logger.Printf("[macos-unifiedlogs] Failed to get message string data for firehose activity log entry: %v", err)
+						logger.Printf(" Failed to get message string data for firehose activity log entry: %v", err)
 					}
 				case 0x6:
 					logData.ActivityID = uint64(firehose.FirehoseSignpost.ActivityID)
-					logData.MessageFlags = firehose.FirehoseSignpost.Flags
+					logData.MessageFlags = convertToStrings(firehose.FirehoseSignpost.Flags)
 					_, messageData, err := getFirehoseSignpost(
 						&firehose.FirehoseSignpost,
-						provider,
-						cache,
+						self.provider,
+						self.cache,
 						uint64(firehose.FormatStringLocation),
 						preamble.FirstNumberProcID,
 						preamble.SecondNumberProcID,
@@ -369,10 +393,17 @@ func buildLog(unifiedLogData *UnifiedLogData, provider FileProvider, cache Strin
 								preamble.FirstNumberProcID,
 								preamble.SecondNumberProcID,
 								unifiedLogData.Oversize,
+								logger,
 							)
-							logMessage = FormatFirehoseLogMessage(messageData.FormatString, oversizeStrings, firehoseMessageRegex)
+							logMessage = self.message_formatter.FormatFirehoseLogMessage(
+								messageData.FormatString,
+								oversizeStrings,
+							)
 						} else {
-							logMessage = FormatFirehoseLogMessage(messageData.FormatString, firehose.Message.ItemInfo, firehoseMessageRegex)
+							logMessage = self.message_formatter.FormatFirehoseLogMessage(
+								messageData.FormatString,
+								firehose.Message.ItemInfo,
+							)
 						}
 						if excludeMissing && strings.Contains(logMessage, "<Missing message data>") {
 							addMissing(catalogData, preambleIndex, firehoseIndex, unifiedLogData.Header, &missingUnifiedLogData, preamble)
@@ -389,25 +420,25 @@ func buildLog(unifiedLogData *UnifiedLogData, provider FileProvider, cache Strin
 							logData.Message = logMessage
 						}
 					} else {
-						logger.Printf("[macos-unifiedlogs] Failed to get message string data for firehose signpost log entry: %v", err)
+						logger.Printf(" Failed to get message string data for firehose signpost log entry: %v", err)
 					}
 					if firehose.FirehoseSignpost.Subsystem != 0 {
 						subsystem, err := catalogData.Catalog.GetSubsystem(
 							firehose.FirehoseSignpost.Subsystem,
 							preamble.FirstNumberProcID,
-							preamble.SecondNumberProcID,
+							preamble.SecondNumberProcID, logger,
 						)
 						if err == nil {
 							logData.Subsystem = subsystem.Subsystem
 							logData.Category = subsystem.Category
 						} else {
-							logger.Printf("[macos-unifiedlogs] Failed to get subsystem: %v", err)
+							logger.Printf(" Failed to get subsystem: %v", err)
 						}
 					}
 				case 0x3:
 					_, messageData, err := getFirehoseTraceStrings(
-						provider,
-						cache,
+						self.provider,
+						self.cache,
 						uint64(firehose.FormatStringLocation),
 						preamble.FirstNumberProcID,
 						preamble.SecondNumberProcID,
@@ -419,7 +450,10 @@ func buildLog(unifiedLogData *UnifiedLogData, provider FileProvider, cache Strin
 						logData.Process = messageData.Process
 						logData.ProcessUUID = messageData.ProcessUUID
 
-						logMessage := FormatFirehoseLogMessage(messageData.FormatString, firehose.Message.ItemInfo, firehoseMessageRegex)
+						logMessage := self.message_formatter.FormatFirehoseLogMessage(
+							messageData.FormatString,
+							firehose.Message.ItemInfo,
+						)
 						if excludeMissing && strings.Contains(logMessage, "<Missing message data>") {
 							addMissing(catalogData, preambleIndex, firehoseIndex, unifiedLogData.Header, &missingUnifiedLogData, preamble)
 							continue
@@ -430,10 +464,10 @@ func buildLog(unifiedLogData *UnifiedLogData, provider FileProvider, cache Strin
 							logData.Message = logMessage
 						}
 					} else {
-						logger.Printf("[macos-unifiedlogs] Failed to get message string data for firehose activity log entry: %v", err)
+						logger.Printf(" Failed to get message string data for firehose activity log entry: %v", err)
 					}
 				default:
-					logger.Printf("[macos-unifiedlogs] Parsed unknown log firehose data: %+v", firehose)
+					logger.Printf(" Parsed unknown log firehose data: %+v", firehose)
 				}
 				logDataVec = append(logDataVec, logData)
 			}
@@ -450,16 +484,16 @@ func buildLog(unifiedLogData *UnifiedLogData, provider FileProvider, cache Strin
 				timezoneName = timezoneBase(unifiedLogData.Header[0].TimezonePath)
 			}
 
-			timestamp := getTimestamp(timesyncData, bootUUID, simpledump.ContinousTime, noFirehosePreamble)
+			timestamp := getTimestamp(timesyncData, bootUUID,
+				simpledump.ContinousTime, noFirehosePreamble)
 
 			logData := LogData{
 				Subsystem:    simpledump.Subsystem,
 				ThreadID:     simpledump.ThreadID,
 				PID:          simpledump.FirstProcID,
-				Time:         timestamp,
-				Timestamp:    unixEpochToISO(int64(timestamp)),
-				LogType:      LogTypeSimpledump,
-				EventType:    EventTypeSimpledump,
+				Time:         time.Unix(0, timestamp).UTC(),
+				LogType:      string(LogTypeSimpledump),
+				EventType:    string(EventTypeSimpledump),
 				Message:      simpledump.MessageString,
 				BootUUID:     bootUUID,
 				TimezoneName: timezoneName,
@@ -469,8 +503,8 @@ func buildLog(unifiedLogData *UnifiedLogData, provider FileProvider, cache Strin
 
 			// Extract Process info from shared strings
 			if _, procLib, err := extractSharedStrings(
-				provider,
-				cache,
+				self.provider,
+				self.cache,
 				uint64(simpledump.UnknownOffset),
 				simpledump.FirstProcID,
 				uint32(simpledump.SecondProcID),
@@ -493,12 +527,14 @@ func buildLog(unifiedLogData *UnifiedLogData, provider FileProvider, cache Strin
 			// Check for binary plist (bplist)
 			case 0x1:
 				if bytes.HasPrefix(statedump.StatedumpData, []byte("bplist")) {
-					dataString = ParseStatedumpPlist(statedump.StatedumpData)
+					dataString = ParseStatedumpPlist(
+						statedump.StatedumpData, logger)
 				} else {
 					// plist could also just be plaintext
-					_, stringData, err := extractString(statedump.StatedumpData)
+					_, stringData, err := extractString(
+						statedump.StatedumpData, logger)
 					if err != nil {
-						logger.Printf("[macos-unifiedlogs] Failed to extract plist string from statedump: %v", err)
+						logger.Printf(" Failed to extract plist string from statedump: %v", err)
 						dataString = "Failed to extract plist string from statedump"
 					} else {
 						dataString = stringData
@@ -511,12 +547,15 @@ func buildLog(unifiedLogData *UnifiedLogData, provider FileProvider, cache Strin
 					dataString = "Failed to parse StateDump protobuf: " + encodeStandard(statedump.StatedumpData)
 				}
 			case 0x3:
-				dataString = parseStatedumpObject(statedump.StatedumpData, statedump.TitleName)
+				dataString = parseStatedumpObject(
+					statedump.StatedumpData,
+					statedump.TitleName, logger)
 			default:
 				logger.Printf("Unknown statedump data type: %v", statedump.UnknownDataType)
-				_, stringData, err := extractString(statedump.StatedumpData)
+				_, stringData, err := extractString(
+					statedump.StatedumpData, logger)
 				if err != nil {
-					logger.Printf("[macos-unifiedlogs] Failed to extract string from statedump: %v", err)
+					logger.Printf(" Failed to extract string from statedump: %v", err)
 					dataString = "Failed to extract string from statedump"
 				} else {
 					dataString = stringData
@@ -533,14 +572,15 @@ func buildLog(unifiedLogData *UnifiedLogData, provider FileProvider, cache Strin
 			timestamp := getTimestamp(timesyncData, bootUUID, statedump.ContinuousTime, noFirehosePreamble)
 
 			logData := LogData{
-				PID:          statedump.FirstProcID,
-				ActivityID:   statedump.ActivityID,
-				Time:         timestamp,
-				Timestamp:    unixEpochToISO(int64(timestamp)),
-				EventType:    EventTypeStatedump,
-				Message:      "title: " + statedump.TitleName + "\nObject Type: " + statedump.DecoderLibrary + "\nObject Type: " + statedump.DecoderType + "\n" + dataString,
-				LogType:      LogTypeStatedump,
-				EUID:         catalogData.Catalog.GetEUID(statedump.FirstProcID, statedump.SecondProcID),
+				PID:        statedump.FirstProcID,
+				ActivityID: statedump.ActivityID,
+				Time:       time.Unix(0, timestamp).UTC(),
+				EventType:  string(EventTypeStatedump),
+				Message:    "title: " + statedump.TitleName + "\nObject Type: " + statedump.DecoderLibrary + "\nObject Type: " + statedump.DecoderType + "\n" + dataString,
+				LogType:    string(LogTypeStatedump),
+				EUID: catalogData.Catalog.GetEUID(
+					statedump.FirstProcID,
+					statedump.SecondProcID, logger),
 				BootUUID:     bootUUID,
 				TimezoneName: timezoneName,
 				LibraryUUID:  statedump.UUID,
@@ -550,7 +590,10 @@ func buildLog(unifiedLogData *UnifiedLogData, provider FileProvider, cache Strin
 			_, processUUID := getCatalogDSC(&catalogData.Catalog, statedump.FirstProcID, statedump.SecondProcID)
 			logData.ProcessUUID = processUUID
 
-			if _, process, err := getUUIDImagePath(logData.ProcessUUID, provider, cache); err == nil {
+			if _, process, err := getUUIDImagePath(
+				logData.ProcessUUID,
+				self.provider,
+				self.cache); err == nil {
 				logData.Process = process
 			}
 
@@ -620,20 +663,26 @@ func getEventType(eventType uint8) EventType {
 }
 
 // getHeaderData gets the header of the Unified Log data (tracev3 file).
-func getHeaderData(data []byte, unifiedLogData *UnifiedLogData) {
-	header, err := parseHeader(newCursor(data))
+func getHeaderData(
+	c *ReadCursor,
+	preamble *LogPreamble,
+	unifiedLogData *UnifiedLogData,
+	logger *Logger) {
+	header, err := parseHeader(c, preamble, logger)
 	if err != nil {
-		logger.Printf("[macos-unifiedlogs] Failed to parse header data: %v", err)
+		logger.Printf(" Failed to parse header data: %v", err)
 		return
 	}
 	unifiedLogData.Header = append(unifiedLogData.Header, *header)
 }
 
 // getCatalogData gets the catalog data of the Unified Log data (tracev3 file).
-func getCatalogData(data []byte, catalogData *UnifiedLogCatalogData) {
-	_, catalog, err := parseCatalog(data)
+func getCatalogData(c *ReadCursor,
+	preamble *LogPreamble,
+	catalogData *UnifiedLogCatalogData, logger *Logger) {
+	catalog, err := parseCatalog(c, preamble, logger)
 	if err != nil {
-		logger.Printf("[macos-unifiedlogs] Failed to parse catalog data: %v", err)
+		logger.Printf(" Failed to parse catalog data: %v", err)
 		return
 	}
 	catalogData.Catalog = catalog
@@ -645,14 +694,27 @@ func getCatalogData(data []byte, catalogData *UnifiedLogCatalogData) {
 //
 // Named getChunksetLogData to avoid colliding with ChunksetChunk's
 // getChunksetData (the per-chunk dispatcher).
-func getChunksetLogData(data []byte, catalogData *UnifiedLogCatalogData, unifiedLogData *UnifiedLogData) {
-	_, chunkset, err := ParseChunkset(data)
+func getChunksetLogData(
+	c *ReadCursor,
+	preamble *LogPreamble,
+	catalogData *UnifiedLogCatalogData,
+	unifiedLogData *UnifiedLogData, logger *Logger) {
+	chunkset, err := ParseChunkset(c, preamble, logger)
 	if err != nil {
-		logger.Printf("[macos-unifiedlogs] Failed to parse chunkset data: %v", err)
+		logger.Printf(" Failed to parse chunkset data: %v", err)
 		return
 	}
-	if _, err := ParseChunksetData(chunkset.DecompressedData, catalogData); err != nil {
-		logger.Printf("[macos-unifiedlogs] Failed to parse chunkset data: %v", err)
+
+	atomic.AddInt64(&gStats.DecompressedChunks, 1)
+	// Create a new buffer from the compressed data.
+	nc := NewReadCursorFromBuffer(chunkset.DecompressedData, CursorOptions{
+		Filename: c.Name + "(Compressed)",
+	})
+	defer nc.Close()
+
+	err = ParseChunksetData(nc, catalogData, logger)
+	if err != nil {
+		logger.Printf(" Failed to parse chunkset data: %v", err)
 		return
 	}
 	unifiedLogData.Oversize = append(unifiedLogData.Oversize, catalogData.Oversize...)
@@ -683,7 +745,12 @@ func trackMissing(firstProcID uint64, secondProcID uint32, time uint64, firehose
 
 // addMissing adds a missing log entry to the log data tracker. Log data may be
 // in another file. Mainly related to logs that have Oversize data.
-func addMissing(catalogData *UnifiedLogCatalogData, preambleIndex int, firehoseIndex int, header []HeaderChunk, missing *UnifiedLogData, preamble FirehosePreamble) {
+func addMissing(catalogData *UnifiedLogCatalogData,
+	preambleIndex int, firehoseIndex int,
+	header []HeaderChunk,
+	missing *UnifiedLogData,
+	preamble FirehosePreamble) {
+
 	missingFirehose := trackMissing(
 		catalogData.Firehose[preambleIndex].FirstNumberProcID,
 		catalogData.Firehose[preambleIndex].SecondNumberProcID,

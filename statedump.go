@@ -38,60 +38,51 @@ type Statedump struct {
 
 // ParseStatedump parses a Statedump log entry. Statedumps are special log
 // entries that may contain a plist file, custom object, or protocol buffer.
-func ParseStatedump(data []byte) ([]byte, Statedump, error) {
+func ParseStatedump(
+	data []byte,
+	preamble *LogPreamble,
+	logger *Logger) (Statedump, error) {
 	var statedumpResults Statedump
 
 	c := newCursor(data)
-	statedumpChunkTag, err := c.u32()
-	if err != nil {
-		return nil, statedumpResults, err
-	}
-	statedumpChunkSubTag, err := c.u32()
-	if err != nil {
-		return nil, statedumpResults, err
-	}
-	statedumpChunkDataSize, err := c.u64()
-	if err != nil {
-		return nil, statedumpResults, err
-	}
 	statedumpFirstProcID, err := c.u64()
 	if err != nil {
-		return nil, statedumpResults, err
+		return statedumpResults, err
 	}
 	statedumpSecondProcID, err := c.u32()
 	if err != nil {
-		return nil, statedumpResults, err
+		return statedumpResults, err
 	}
 	statedumpTTL, err := c.u8()
 	if err != nil {
-		return nil, statedumpResults, err
+		return statedumpResults, err
 	}
 
 	const reservedSize = 3
 	reserved, err := c.take(reservedSize)
 	if err != nil {
-		return nil, statedumpResults, err
+		return statedumpResults, err
 	}
 
 	statedumpContinousTime, err := c.u64()
 	if err != nil {
-		return nil, statedumpResults, err
+		return statedumpResults, err
 	}
 	statedumpActivityID, err := c.u64()
 	if err != nil {
-		return nil, statedumpResults, err
+		return statedumpResults, err
 	}
 	uuid, err := c.u128be()
 	if err != nil {
-		return nil, statedumpResults, err
+		return statedumpResults, err
 	}
 	statedumpUnknownDataType, err := c.u32()
 	if err != nil {
-		return nil, statedumpResults, err
+		return statedumpResults, err
 	}
 	statedumpUnknownDataSize, err := c.u32()
 	if err != nil {
-		return nil, statedumpResults, err
+		return statedumpResults, err
 	}
 
 	const customDecoder = 3
@@ -100,29 +91,29 @@ func ParseStatedump(data []byte) ([]byte, Statedump, error) {
 	// Nom unknown data if data type is not custom
 	if statedumpUnknownDataType != customDecoder {
 		if _, err = c.take(stringSize); err != nil {
-			return nil, statedumpResults, err
+			return statedumpResults, err
 		}
 		if _, err = c.take(stringSize); err != nil {
-			return nil, statedumpResults, err
+			return statedumpResults, err
 		}
 	}
 
 	if statedumpUnknownDataType == customDecoder {
 		libraryData, err := c.take(stringSize)
 		if err != nil {
-			return nil, statedumpResults, err
+			return statedumpResults, err
 		}
 		typeData, err := c.take(stringSize)
 		if err != nil {
-			return nil, statedumpResults, err
+			return statedumpResults, err
 		}
-		_, decoderLibrary, err := extractString(libraryData)
+		_, decoderLibrary, err := extractString(libraryData, logger)
 		if err != nil {
-			return nil, statedumpResults, err
+			return statedumpResults, err
 		}
-		_, decoderType, err := extractString(typeData)
+		_, decoderType, err := extractString(typeData, logger)
 		if err != nil {
-			return nil, statedumpResults, err
+			return statedumpResults, err
 		}
 
 		statedumpResults.DecoderLibrary = decoderLibrary
@@ -131,17 +122,17 @@ func ParseStatedump(data []byte) ([]byte, Statedump, error) {
 
 	titleData, err := c.take(stringSize)
 	if err != nil {
-		return nil, statedumpResults, err
+		return statedumpResults, err
 	}
-	_, titleName, err := extractString(titleData)
+	_, titleName, err := extractString(titleData, logger)
 	if err != nil {
-		return nil, statedumpResults, err
+		return statedumpResults, err
 	}
 
 	statedumpResults.TitleName = titleName
-	statedumpResults.ChunkTag = statedumpChunkTag
-	statedumpResults.ChunkSubtag = statedumpChunkSubTag
-	statedumpResults.ChunkDataSize = statedumpChunkDataSize
+	statedumpResults.ChunkTag = preamble.ChunkTag
+	statedumpResults.ChunkSubtag = preamble.ChunkSubTag
+	statedumpResults.ChunkDataSize = preamble.ChunkDataSize
 	statedumpResults.FirstProcID = statedumpFirstProcID
 	statedumpResults.SecondProcID = statedumpSecondProcID
 	statedumpResults.TTL = statedumpTTL
@@ -155,57 +146,61 @@ func ParseStatedump(data []byte) ([]byte, Statedump, error) {
 
 	statedumpData, err := c.take(int(statedumpUnknownDataSize))
 	if err != nil {
-		return nil, statedumpResults, err
+		return statedumpResults, err
 	}
 	statedumpResults.StatedumpData = statedumpData
 
-	return c.rest(), statedumpResults, nil
+	return statedumpResults, nil
 }
 
 // ParseStatedumpPlist parses the binary plist file in the log. The plist may be empty.
-func ParseStatedumpPlist(plistData []byte) string {
+func ParseStatedumpPlist(
+	plistData []byte, logger *Logger) string {
 	if len(plistData) == 0 {
-		logger.Printf("[macos-unifiedlogs] Empty plist data in statedump")
+		logger.Printf(" Empty plist data in statedump")
 		return "Empty plist data"
 	}
 	var results interface{}
 	if _, err := plist.Unmarshal(plistData, &results); err != nil {
-		logger.Printf("[macos-unifiedlogs] Failed to parse statedump plist data: %v", err)
+		logger.Printf(" Failed to parse statedump plist data: %v", err)
 		return "Failed to get plist data"
 	}
 	jsonData, err := json.Marshal(results)
 	if err != nil {
-		logger.Printf("[macos-unifiedlogs] Failed to convert plist to json: %v", err)
+		logger.Printf(" Failed to convert plist to json: %v", err)
 		return "Failed to convert plist data to json"
 	}
 	return string(jsonData)
 }
 
 // parseStatedumpObject parses custom Apple objects.
-func parseStatedumpObject(objectData []byte, name string) string {
+func parseStatedumpObject(
+	objectData []byte,
+	name string,
+	logger *Logger) string {
 	var result string
 	var err error
 
 	switch name {
 	case "CLDaemonStatusStateTracker":
-		_, result, err = getDaemonStatusTracker(objectData)
+		_, result, err = getDaemonStatusTracker(objectData, logger)
 	case "CLClientManagerStateTracker":
 		_, result, err = getStateTrackerData(objectData)
 	case "CLLocationManagerStateTracker":
 		_, result, err = getLocationTrackerState(objectData)
 	case "DNS Configuration":
-		_, result, err = getDNSConfig(objectData)
+		_, result, err = getDNSConfig(objectData, logger)
 	case "Network information":
-		_, result, err = getNetworkInterface(objectData)
+		_, result, err = getNetworkInterface(objectData, logger)
 	default:
 		return fmt.Sprintf("Unsupported Statedump object: %s-%s", name, encodeStandard(objectData))
 	}
 
 	if err != nil {
 		if decoderErr, ok := err.(*DecoderError); ok {
-			logger.Printf("[macos-unifiedlogs] Failed to parse statedump object %s: %s", name, decoderErr.Debug())
+			logger.Printf(" Failed to parse statedump object %s: %s", name, decoderErr.Debug())
 		} else {
-			logger.Printf("[macos-unifiedlogs] Failed to parse statedump object %s: %v", name, err)
+			logger.Printf(" Failed to parse statedump object %s: %v", name, err)
 		}
 		return fmt.Sprintf("Failed to parse statedump object: %s", name)
 	}

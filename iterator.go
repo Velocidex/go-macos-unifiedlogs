@@ -11,9 +11,11 @@ package unifiedlogs
 // to Next returns the data (header, catalog(s), oversize) for one catalog
 // chunk, mirroring the Rust crate's UnifiedLogIterator.
 type UnifiedLogIterator struct {
-	Data     []byte
+	Reader   *ReadCursor
 	Header   []HeaderChunk
 	Evidence string
+
+	Logger *Logger
 }
 
 // Next returns the parsed Unified Log data for the next catalog. It returns
@@ -23,89 +25,84 @@ type UnifiedLogIterator struct {
 // iterator stops and rewinds to that chunk so it will be processed on the next
 // call.
 func (u *UnifiedLogIterator) Next() (*UnifiedLogData, bool) {
-	if len(u.Data) == 0 {
-		return nil, false
-	}
+	logger := u.Logger
+
 	unifiedLogData := UnifiedLogData{
-		Header:   append([]HeaderChunk{}, u.Header...),
+		Header:   u.Header,
 		Evidence: u.Evidence,
 	}
 
-	// Keep a local copy of the catalog so we know when a new catalog chunk starts
+	// Keep a local copy of the catalog so we know when a new catalog
+	// chunk starts
 	var catalogData UnifiedLogCatalogData
-
-	input := u.Data
-	const chunkPreambleSize = 16 // Include preamble size in total chunk size
-
-	const headerChunk = 0x1000
-	const catalogChunk = 0x600b
-	const chunksetChunk = 0x600d
 
 loop:
 	for {
-		preamble, err := detectPreamble(input)
+		offset := u.Reader.Tell()
+
+		preamble, err := parsePreamble(u.Reader)
 		if err != nil {
-			logger.Printf("Failed to determine preamble chunk")
+			// We already read the catalog, return what we have
+			if catalogData.Catalog.ChunkTag != 0 {
+				break
+			}
+
+			// We could not find a catalog but we still hit EOF. This
+			// could be the last chunk.
 			return nil, false
 		}
 		chunkSize := preamble.ChunkDataSize
 
 		if chunkSize > ^uint64(0)-chunkPreambleSize {
-			logger.Printf("Failed to nom chunk bytes")
+			logger.Debugf("Large chunkSize at header %v", chunkSize)
 			return nil, false
 		}
-
-		// Grab all data associated with Unified Log entry (chunk)
-		data, chunkData, err := nomBytes(input, chunkSize+chunkPreambleSize)
-		if err != nil {
-			logger.Printf("Failed to nom chunk bytes")
-			return nil, false
-		}
-
 		switch preamble.ChunkTag {
 		case headerChunk:
-			getHeaderData(chunkData, &unifiedLogData)
+			getHeaderData(u.Reader, preamble, &unifiedLogData, logger)
+
 		case catalogChunk:
+			// We already have a catalog - return what we have and
+			// rewind the cursor to the start of this catalog
+			// chunk. The next call to Next() will collect the catalog
+			// and the records after it.
 			if catalogData.Catalog.ChunkTag != 0 {
-				u.Data = input
+				u.Reader.Pos(offset)
 				break loop
 			}
-			getCatalogData(chunkData, &catalogData)
+			getCatalogData(u.Reader, preamble, &catalogData, logger)
+
 		case chunksetChunk:
-			getChunksetLogData(chunkData, &catalogData, &unifiedLogData)
+			getChunksetLogData(
+				u.Reader, preamble, &catalogData,
+				&unifiedLogData, logger)
+
 		default:
-			logger.Printf("[macos-unifiedlogs] Unknown chunk type: %v", preamble.ChunkTag)
+			// Skip the chunk and ignore it
+			u.Reader.skip(int(preamble.ChunkDataSize))
+			logger.Printf(" Unknown chunk type: %v", preamble.ChunkTag)
 		}
 
 		paddingSize := paddingSize8(preamble.ChunkDataSize)
-		if uint64(len(u.Data)) < paddingSize {
-			u.Data = nil
+		next_offset := paddingSize + uint64(offset) + preamble.ChunkDataSize + chunkPreambleSize
+		current_offset := uint64(u.Reader.Tell())
+
+		// Should not really happen - we can not really go backwards.
+		if current_offset > next_offset {
+			u.Reader.Pos(int64(next_offset))
 			break
-		}
-		nextData, _, err := nomBytes(data, paddingSize)
-		if err != nil {
-			logger.Printf("Failed to nom log end padding")
-			return nil, false
-		}
-		if len(nextData) == 0 {
-			u.Data = nil
-			break
-		}
-		if len(nextData) == len(input) {
-			u.Data = nil
-			break
-		}
-		input = nextData
-		if len(input) < chunkPreambleSize {
-			logger.Printf("Not enough data for preamble header, needed 16 bytes. Got: %d", len(input))
-			u.Data = nil
-			break
+		} else if next_offset > current_offset {
+			err = u.Reader.skip(int(next_offset - current_offset))
+			if err != nil {
+				return nil, false
+			}
 		}
 	}
 
 	// Make sure to get the last catalog
 	if catalogData.Catalog.ChunkTag != 0 {
-		unifiedLogData.CatalogData = append(unifiedLogData.CatalogData, catalogData)
+		unifiedLogData.CatalogData = append(unifiedLogData.CatalogData,
+			catalogData)
 	}
 	u.Header = unifiedLogData.Header
 	return &unifiedLogData, true
@@ -113,6 +110,6 @@ loop:
 
 // nomBytes takes size bytes from data, returning the remaining data and the
 // taken bytes. Mirrors the Rust crate's nom_bytes helper.
-func nomBytes(data []byte, size uint64) ([]byte, []byte, error) {
-	return nomTake(data, size)
+func nomBytes(c *ReadCursor, size uint64) ([]byte, error) {
+	return c.take(int(size))
 }

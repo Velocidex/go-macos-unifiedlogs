@@ -23,7 +23,10 @@ func TestParseHeader(t *testing.T) {
 		101, 119, 95, 89, 111, 114, 107, 0, 0, 0, 0, 0, 0,
 	}
 
-	headerData, err := parseHeader(newCursor(testChunkHeader))
+	c := NewReadCursorFromBuffer(testChunkHeader)
+	logger := NewLogger()
+	preamble, _ := parsePreamble(c)
+	headerData, err := parseHeader(c, preamble, logger)
 	if err != nil {
 		t.Fatalf("parseHeader returned error: %v", err)
 	}

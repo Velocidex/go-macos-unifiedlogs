@@ -8,22 +8,15 @@
 package unifiedlogs
 
 import (
-	"io"
 	"path/filepath"
 )
 
 // ParseLog parses a tracev3 file and returns the deconstructed log data.
-func ParseLog(reader io.Reader, evidence string) (*UnifiedLogData, error) {
-	buf, err := io.ReadAll(reader)
+func ParseLog(reader *ReadCursor,
+	evidence string, logger *Logger) (*UnifiedLogData, error) {
+	logData, err := parseUnifiedLog(reader, evidence, logger)
 	if err != nil {
-		logger.Printf("[macos-unifiedlogs] Failed to read the tracev3 file: %v", err)
-		return nil, ErrRead
-	}
-	logger.Printf("Read %d bytes from tracev3 file", len(buf))
-
-	_, logData, err := parseUnifiedLog(buf, evidence)
-	if err != nil {
-		logger.Printf("[macos-unifiedlogs] Failed to parse the tracev3 file: %v", err)
+		logger.Printf(" Failed to parse the tracev3 file: %v", err)
 		return nil, ErrTracev3Parse
 	}
 	return logData, nil
@@ -33,19 +26,20 @@ func ParseLog(reader io.Reader, evidence string) (*UnifiedLogData, error) {
 // same layout as the live system (ex: path/to/files/<two character UUID>/<remaining UUID name>).
 func CollectStrings(provider FileProvider) ([]*UUIDText, error) {
 	var uuidtextVec []*UUIDText
+	logger := provider.Logger()
 
 	for _, source := range provider.UUIDTextFiles() {
 		buf, err := readSource(source)
 		if err != nil {
-			logger.Printf("[macos-unifiedlogs] Failed to read uuidfile %s: %v", source.SourcePath(), err)
+			logger.Printf(" Failed to read uuidfile %s: %v", source.SourcePath(), err)
 			continue
 		}
 
 		logger.Printf("Read %d bytes for file %s", len(buf), source.SourcePath())
 
-		uuidtextData, err := parseUUIDText(buf)
+		uuidtextData, err := ParseUUIDText(buf, logger)
 		if err != nil {
-			logger.Printf("[macos-unifiedlogs] Failed to parse UUID file %s: %v", source.SourcePath(), err)
+			logger.Printf(" Failed to parse UUID file %s: %v", source.SourcePath(), err)
 			continue
 		}
 
@@ -60,16 +54,17 @@ func CollectStrings(provider FileProvider) ([]*UUIDText, error) {
 func CollectSharedStrings(provider FileProvider) ([]*SharedCacheStrings, error) {
 	var sharedStringsVec []*SharedCacheStrings
 
+	logger := provider.Logger()
+
 	for _, source := range provider.DSCFiles() {
-		buf, err := readSource(source)
+		reader, err := source.Reader()
 		if err != nil {
-			logger.Printf("[macos-unifiedlogs] Failed to read dsc file: %v", err)
 			continue
 		}
 
-		results, err := parseDSC(buf)
+		results, err := ParseDSC(reader, logger)
 		if err != nil {
-			logger.Printf("[macos-unifiedlogs] Failed to parse dsc file: %v", err)
+			logger.Printf(" Failed to parse dsc file: %v", err)
 			continue
 		}
 
@@ -82,18 +77,20 @@ func CollectSharedStrings(provider FileProvider) ([]*SharedCacheStrings, error) 
 
 // CollectTimesync parses all timesync files provided by the provider.
 func CollectTimesync(provider FileProvider) (map[string]*TimesyncBoot, error) {
+	logger := provider.Logger()
+
 	timesyncData := make(map[string]*TimesyncBoot)
 
 	for _, source := range provider.TimesyncFiles() {
 		buffer, err := readSource(source)
 		if err != nil {
-			logger.Printf("[macos-unifiedlogs] Failed to read timesync file: %v", err)
+			logger.Printf(" Failed to read timesync file: %v", err)
 			continue
 		}
 
-		timesyncMap, err := parseTimesyncData(buffer)
+		timesyncMap, err := parseTimesyncData(buffer, logger)
 		if err != nil {
-			logger.Printf("[macos-unifiedlogs] Failed to parse timesync file: %v", err)
+			logger.Printf(" Failed to parse timesync file: %v", err)
 			continue
 		}
 

@@ -149,7 +149,10 @@ var catalogTestPersona = []byte{
 }
 
 func TestParseCatalog(t *testing.T) {
-	_, catalogData, err := parseCatalog(catalogTestChunkCatalog)
+	c := NewReadCursorFromBuffer(catalogTestChunkCatalog)
+	logger := NewLogger()
+	preamble, _ := parsePreamble(c)
+	catalogData, err := parseCatalog(c, preamble, logger)
 	if err != nil {
 		t.Fatalf("parseCatalog returned error: %v", err)
 	}
@@ -223,8 +226,9 @@ func TestParseCatalog(t *testing.T) {
 func TestParseCatalogProcessEntry(t *testing.T) {
 	testData := []string{"MAIN", "DSC", "OTHER"}
 
-	c := newCursor(catalogTestSubsystemData)
-	processEntry, err := parseCatalogProcessEntry(c, testData)
+	c := NewReadCursorFromBuffer(catalogTestSubsystemData)
+	logger := NewLogger()
+	processEntry, err := parseCatalogProcessEntry(c, testData, logger)
 	if err != nil {
 		t.Fatalf("parseCatalogProcessEntry returned error: %v", err)
 	}
@@ -283,7 +287,7 @@ func TestParseCatalogProcessEntry(t *testing.T) {
 }
 
 func TestParseProcessInfoUUIDEntry(t *testing.T) {
-	c := newCursor(catalogTestSubsystemData2)
+	c := NewReadCursorFromBuffer(catalogTestSubsystemData2)
 	subsystems, err := parseProcessInfoSubystem(c)
 	if err != nil {
 		t.Fatalf("parseProcessInfoSubystem returned error: %v", err)
@@ -314,9 +318,9 @@ func TestParseProcessInfoUUIDEntry(t *testing.T) {
 }
 
 func TestParseCatalogSubchunk(t *testing.T) {
-	c := newCursor(catalogTestSubchunks)
-
-	subchunk, err := parseCatalogSubchunk(c)
+	c := NewReadCursorFromBuffer(catalogTestSubchunks)
+	logger := NewLogger()
+	subchunk, err := parseCatalogSubchunk(c, logger)
 	if err != nil {
 		t.Fatalf("parseCatalogSubchunk returned error: %v", err)
 	}
@@ -345,7 +349,7 @@ func TestParseCatalogSubchunk(t *testing.T) {
 		t.Fatalf("unexpected string_offsets: %v", subchunk.StringOffsets)
 	}
 
-	subchunk, err = parseCatalogSubchunk(c)
+	subchunk, err = parseCatalogSubchunk(c, logger)
 	if err != nil {
 		t.Fatalf("parseCatalogSubchunk returned error: %v", err)
 	}
@@ -359,7 +363,7 @@ func TestParseCatalogSubchunk(t *testing.T) {
 		t.Fatalf("unexpected uncompressed_size: %d", subchunk.UncompressedSize)
 	}
 
-	subchunk, err = parseCatalogSubchunk(c)
+	subchunk, err = parseCatalogSubchunk(c, logger)
 	if err != nil {
 		t.Fatalf("parseCatalogSubchunk returned error: %v", err)
 	}
@@ -375,14 +379,16 @@ func TestParseCatalogSubchunk(t *testing.T) {
 }
 
 func TestParseCatalogSubchunkBadCompression(t *testing.T) {
-	c := newCursor(catalogTestBadCompression)
-	if _, err := parseCatalogSubchunk(c); err == nil {
+	c := NewReadCursorFromBuffer(catalogTestBadCompression)
+	logger := NewLogger()
+	if _, err := parseCatalogSubchunk(c, logger); err == nil {
 		t.Fatal("expected error for bad compression")
 	}
 }
 
 func TestParseCatalogPersona(t *testing.T) {
-	results, err := parseCatalogPersona(catalogTestPersona, 3)
+	logger := NewLogger()
+	results, err := parseCatalogPersona(catalogTestPersona, 3, logger)
 	if err != nil {
 		t.Fatalf("parseCatalogPersona returned error: %v", err)
 	}
@@ -401,14 +407,15 @@ func TestParseCatalogPersona(t *testing.T) {
 }
 
 func TestGetBigSurSubsystem(t *testing.T) {
-	buffer := requireTestData(t, "Catalog Tests/big_sur_catalog.raw")
-
-	_, catalog, err := parseCatalog(buffer)
+	c := requireTestReadCursor(t, "Catalog Tests/big_sur_catalog.raw")
+	logger := NewLogger()
+	preamble, _ := parsePreamble(c)
+	catalog, err := parseCatalog(c, preamble, logger)
 	if err != nil {
 		t.Fatalf("parseCatalog returned error: %v", err)
 	}
 
-	results, err := catalog.GetSubsystem(4, 165, 406)
+	results, err := catalog.GetSubsystem(4, 165, 406, logger)
 	if err != nil {
 		t.Fatalf("GetSubsystem returned error: %v", err)
 	}

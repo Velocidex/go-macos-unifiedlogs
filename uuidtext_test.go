@@ -11,8 +11,8 @@ import "testing"
 
 func TestParseUUIDTextBigSur(t *testing.T) {
 	buffer := requireTestData(t, "UUIDText/Big Sur/1FE459BBDC3E19BBF82D58415A2AE9")
-
-	uuidtextData, err := parseUUIDText(buffer)
+	l := NewLogger()
+	uuidtextData, err := ParseUUIDText(buffer, l)
 	if err != nil {
 		t.Fatalf("parseUUIDText returned error: %v", err)
 	}
@@ -47,8 +47,8 @@ func TestParseUUIDTextBigSur(t *testing.T) {
 
 func TestParseUUIDTextHighSierra(t *testing.T) {
 	buffer := requireTestData(t, "UUIDText/High Sierra/425A2E5B5531B98918411B4379EE5F")
-
-	uuidtextData, err := parseUUIDText(buffer)
+	l := NewLogger()
+	uuidtextData, err := ParseUUIDText(buffer, l)
 	if err != nil {
 		t.Fatalf("parseUUIDText returned error: %v", err)
 	}
@@ -77,15 +77,15 @@ func TestParseUUIDTextHighSierra(t *testing.T) {
 
 func TestParseUUIDTextBadHeader(t *testing.T) {
 	buffer := requireTestData(t, "Bad Data/UUIDText/Bad_Header_1FE459BBDC3E19BBF82D58415A2AE9")
-
-	_, err := parseUUIDText(buffer)
+	l := NewLogger()
+	_, err := ParseUUIDText(buffer, l)
 	requireErrIncomplete(t, err)
 }
 
 func TestParseUUIDTextBadContent(t *testing.T) {
 	buffer := requireTestData(t, "Bad Data/UUIDText/Bad_Content_1FE459BBDC3E19BBF82D58415A2AE9")
-
-	_, err := parseUUIDText(buffer)
+	l := NewLogger()
+	_, err := ParseUUIDText(buffer, l)
 	if err == nil {
 		t.Fatal("expected error for bad UUIDText content, got nil")
 	}
@@ -93,7 +93,7 @@ func TestParseUUIDTextBadContent(t *testing.T) {
 
 func TestParseUUIDTextBadFile(t *testing.T) {
 	buffer := requireTestData(t, "Bad Data/UUIDText/Badfile.txt")
-
-	_, err := parseUUIDText(buffer)
+	l := NewLogger()
+	_, err := ParseUUIDText(buffer, l)
 	requireErrIncomplete(t, err)
 }

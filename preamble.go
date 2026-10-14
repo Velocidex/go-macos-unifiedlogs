@@ -7,6 +7,10 @@
 
 package unifiedlogs
 
+import (
+	"encoding/binary"
+)
+
 // LogPreamble is the preamble (first 16 bytes) of all Unified Log entries (chunks).
 type LogPreamble struct {
 	ChunkTag      uint32 `json:"chunk_tag"`
@@ -14,32 +18,15 @@ type LogPreamble struct {
 	ChunkDataSize uint64 `json:"chunk_data_size"`
 }
 
-// detectPreamble gets the preamble (first 16 bytes of all Unified Log entries
-// (chunks)) to detect the log (chunk) type. Ex: Firehose, Statedump,
-// Simpledump, Catalog, etc. Does not consume the input.
-func detectPreamble(data []byte) (*LogPreamble, error) {
-	return parsePreamble(data)
-}
-
 // parsePreamble gets the preamble (first 16 bytes of all Unified Log entries
 // (chunks)) to detect the log (chunk) type and consumes the input.
-func parsePreamble(data []byte) (*LogPreamble, error) {
-	c := newCursor(data)
-	chunkTag, err := c.u32()
+func parsePreamble(c *ReadCursor) (*LogPreamble, error) {
+	buf, err := c.take(16)
 	if err != nil {
 		return nil, err
 	}
-	chunkSubTag, err := c.u32()
-	if err != nil {
-		return nil, err
-	}
-	chunkDataSize, err := c.u64()
-	if err != nil {
-		return nil, err
-	}
-	return &LogPreamble{
-		ChunkTag:      chunkTag,
-		ChunkSubTag:   chunkSubTag,
-		ChunkDataSize: chunkDataSize,
-	}, nil
+
+	res := &LogPreamble{}
+	_, err = binary.Decode(buf, binary.LittleEndian, res)
+	return res, err
 }

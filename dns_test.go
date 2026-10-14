@@ -45,7 +45,8 @@ func TestGetDnsHeader(t *testing.T) {
 
 func TestGetDomainName(t *testing.T) {
 	testData := "AzE0NAMxMDEDMTY4AzE5Mgdpbi1hZGRyBGFycGEA"
-	result, err := getDomainName(testData)
+	logger := NewLogger()
+	result, err := getDomainName(testData, logger)
 	if err != nil {
 		t.Fatalf("getDomainName failed: %v", err)
 	}
@@ -56,7 +57,8 @@ func TestGetDomainName(t *testing.T) {
 
 func TestGetServiceBinding(t *testing.T) {
 	testData := "AAEAAAEAAwJoMgAEAAhoEJRAaBCVQAAGACAmBkcAAAAAAAAAAABoEJRAJgZHAAAAAAAAAAAAaBCVQA=="
-	result, err := getServiceBinding(testData)
+	logger := NewLogger()
+	result, err := getServiceBinding(testData, logger)
 	if err != nil {
 		t.Fatalf("getServiceBinding failed: %v", err)
 	}
@@ -72,8 +74,8 @@ func TestParseSvcb(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeStandard failed: %v", err)
 	}
-
-	_, result, err := parseSvcb(decodedData)
+	logger := NewLogger()
+	_, result, err := parseSvcb(decodedData, logger)
 	if err != nil {
 		t.Fatalf("parseSvcb failed: %v", err)
 	}
@@ -85,7 +87,8 @@ func TestParseSvcb(t *testing.T) {
 
 func TestParseSvcbAlpn(t *testing.T) {
 	testData := []byte{2, 104, 50}
-	_, result, err := parseSvcbAlpn(testData)
+	logger := NewLogger()
+	_, result, err := parseSvcbAlpn(testData, logger)
 	if err != nil {
 		t.Fatalf("parseSvcbAlpn failed: %v", err)
 	}

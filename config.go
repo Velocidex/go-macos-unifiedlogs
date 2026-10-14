@@ -32,7 +32,7 @@ type DnsConfig struct {
 
 // getDNSConfig parses DNS configuration. Can view live data with macOS command
 // `scutil --dns`. This info is also logged to the Unified Log.
-func getDNSConfig(data []byte) ([]byte, string, error) {
+func getDNSConfig(data []byte, logger *Logger) ([]byte, string, error) {
 	c := newCursor(data)
 	resolverCount, err := c.u32be()
 	if err != nil {
@@ -73,7 +73,7 @@ func getDNSConfig(data []byte) ([]byte, string, error) {
 	// original Rust implementation returns.
 	input := c.rest()
 	totalCount := resolverCount + scopeCount
-	_, message, err := parseDNSConfig(input, totalCount)
+	_, message, err := parseDNSConfig(input, totalCount, logger)
 	if err != nil {
 		return data, "", err
 	}
@@ -82,7 +82,8 @@ func getDNSConfig(data []byte) ([]byte, string, error) {
 }
 
 // parseDNSConfig parses the DNS config data and assembles the message.
-func parseDNSConfig(data []byte, resolverScopeCount uint32) ([]byte, string, error) {
+func parseDNSConfig(data []byte,
+	resolverScopeCount uint32, logger *Logger) ([]byte, string, error) {
 	count := uint32(0)
 	remaining := data
 	var resolvers []DnsConfig
@@ -112,19 +113,19 @@ func parseDNSConfig(data []byte, resolverScopeCount uint32) ([]byte, string, err
 
 		switch resolverOrScope {
 		case 1:
-			_, config, err := parseDNSResolver(configData)
+			_, config, err := parseDNSResolver(configData, logger)
 			if err != nil {
 				return remaining, "", err
 			}
 			resolvers = append(resolvers, config)
 		case 2:
-			_, config, err := parseDNSResolver(configData)
+			_, config, err := parseDNSResolver(configData, logger)
 			if err != nil {
 				return remaining, "", err
 			}
 			scopes = append(scopes, config)
 		default:
-			logger.Printf("[macos-unifiedlogs] Unknown DNS config type. Neither resolver or scope: %d\n", resolverOrScope)
+			logger.Printf(" Unknown DNS config type. Neither resolver or scope: %d\n", resolverOrScope)
 			return remaining, fmt.Sprintf(
 				"Unknown DNS config type. Neither resolver or scope: %d: %s",
 				resolverOrScope, encodeStandard(data),
@@ -183,7 +184,7 @@ func assembleMessage(logMessage string, configs []DnsConfig) string {
 }
 
 // parseDNSResolver parses DNS resolver data.
-func parseDNSResolver(data []byte) ([]byte, DnsConfig, error) {
+func parseDNSResolver(data []byte, logger *Logger) ([]byte, DnsConfig, error) {
 	c := newCursor(data)
 	// Seen 0x0
 	if err := c.skip(8); err != nil {
@@ -286,43 +287,43 @@ func parseDNSResolver(data []byte) ([]byte, DnsConfig, error) {
 		remaining = oc.rest()
 		switch optionType {
 		case 0xc:
-			_, v, err := extractString(optionData)
+			_, v, err := extractString(optionData, logger)
 			if err != nil {
 				return remaining, config, err
 			}
 			config.SearchDomains = append(config.SearchDomains, v)
 		case 0x10:
-			_, v, err := extractString(optionData)
+			_, v, err := extractString(optionData, logger)
 			if err != nil {
 				return remaining, config, err
 			}
 			config.IfIndexValue = v
 		case 0xb:
-			_, v, err := parseNameserver(optionData)
+			_, v, err := parseNameserver(optionData, logger)
 			if err != nil {
 				return remaining, config, err
 			}
 			config.Nameservers = append(config.Nameservers, v)
 		case 0xf:
-			_, v, err := extractString(optionData)
+			_, v, err := extractString(optionData, logger)
 			if err != nil {
 				return remaining, config, err
 			}
 			config.ConfigID = v
 		case 0xa:
-			_, v, err := extractString(optionData)
+			_, v, err := extractString(optionData, logger)
 			if err != nil {
 				return remaining, config, err
 			}
 			config.Domain = v
 		case 0xe:
-			_, v, err := extractString(optionData)
+			_, v, err := extractString(optionData, logger)
 			if err != nil {
 				return remaining, config, err
 			}
 			config.Options = v
 		default:
-			logger.Printf("[macos-unifiedlogs] Unknown DNS option type: %d\n", optionType)
+			logger.Printf(" Unknown DNS option type: %d\n", optionType)
 			config.Unknown = fmt.Sprintf(
 				"Unknown DNS option type: %d: %s",
 				optionType, encodeStandard(data),
@@ -335,7 +336,7 @@ func parseDNSResolver(data []byte) ([]byte, DnsConfig, error) {
 }
 
 // parseNameserver parses a nameserver IPv4 or IPv6.
-func parseNameserver(data []byte) ([]byte, string, error) {
+func parseNameserver(data []byte, logger *Logger) ([]byte, string, error) {
 	ipv4 := 16
 	ipv6 := 28
 	var input []byte
@@ -365,7 +366,7 @@ func parseNameserver(data []byte) ([]byte, string, error) {
 		input = data
 		value = ip.String()
 	} else {
-		logger.Printf("[macos-unifiedlogs] Unknown nameserver data type\n")
+		logger.Printf(" Unknown nameserver data type\n")
 		return data, fmt.Sprintf("Unknown nameserver data type: %s", encodeStandard(data)), nil
 	}
 
@@ -390,7 +391,8 @@ type NetworkInterface struct {
 // getNetworkInterface parses `Network Interface` structures. The format is open
 // source at
 // <https://github.com/apple-oss-distributions/configd/blob/main/nwi/network_state_information_priv.h>
-func getNetworkInterface(data []byte) ([]byte, string, error) {
+func getNetworkInterface(data []byte,
+	logger *Logger) ([]byte, string, error) {
 	c := newCursor(data)
 	if _, err := c.u32(); err != nil { // version
 		return data, "", err
@@ -434,7 +436,7 @@ func getNetworkInterface(data []byte) ([]byte, string, error) {
 	if err != nil {
 		return data, "", err
 	}
-	_, ip4Interfaces, err := parseInterface(ip4InterfaceData, ipv4Count)
+	_, ip4Interfaces, err := parseInterface(ip4InterfaceData, ipv4Count, logger)
 	if err != nil {
 		return data, "", err
 	}
@@ -444,7 +446,7 @@ func getNetworkInterface(data []byte) ([]byte, string, error) {
 		return data, "", err
 	}
 	input := c.rest()
-	_, ip6Interfaces, err := parseInterface(ip6InterfaceData, ipv6Count)
+	_, ip6Interfaces, err := parseInterface(ip6InterfaceData, ipv6Count, logger)
 	if err != nil {
 		return data, "", err
 	}
@@ -455,7 +457,9 @@ func getNetworkInterface(data []byte) ([]byte, string, error) {
 }
 
 // parseInterface parses interface data.
-func parseInterface(data []byte, interfaceCount uint32) ([]byte, []NetworkInterface, error) {
+func parseInterface(data []byte,
+	interfaceCount uint32,
+	logger *Logger) ([]byte, []NetworkInterface, error) {
 	remaining := data
 	count := uint32(0)
 
@@ -467,7 +471,7 @@ func parseInterface(data []byte, interfaceCount uint32) ([]byte, []NetworkInterf
 		if err != nil {
 			return remaining, interfaces, err
 		}
-		_, name, err := extractString(interfaceName)
+		_, name, err := extractString(interfaceName, logger)
 		if err != nil {
 			return remaining, interfaces, err
 		}
@@ -509,7 +513,7 @@ func parseInterface(data []byte, interfaceCount uint32) ([]byte, []NetworkInterf
 			}
 			ip = v.String()
 		default:
-			logger.Printf("[macos-unifiedlogs] Unknown interface family: %d\n", interfaceFamily)
+			logger.Printf(" Unknown interface family: %d\n", interfaceFamily)
 			ip = fmt.Sprintf("Unknown interface family: %d", interfaceFamily)
 		}
 

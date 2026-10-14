@@ -9,7 +9,6 @@ package unifiedlogs
 
 import (
 	"fmt"
-	"math"
 )
 
 // TimesyncBoot contains the timesync boot data associated with the Unified Log.
@@ -37,7 +36,8 @@ type Timesync struct {
 }
 
 // parseTimesyncData parses the Unified Log timesync files.
-func parseTimesyncData(data []byte) (map[string]*TimesyncBoot, error) {
+func parseTimesyncData(
+	data []byte, logger *Logger) (map[string]*TimesyncBoot, error) {
 	timesyncData := make(map[string]*TimesyncBoot)
 	c := newCursor(data)
 
@@ -51,7 +51,7 @@ func parseTimesyncData(data []byte) (map[string]*TimesyncBoot, error) {
 
 		const timesyncSig uint32 = 0x207354
 		if timesyncSignature == timesyncSig {
-			timesync, err := parseTimesync(c)
+			timesync, err := parseTimesync(c, logger)
 			if err != nil {
 				return nil, err
 			}
@@ -64,7 +64,7 @@ func parseTimesyncData(data []byte) (map[string]*TimesyncBoot, error) {
 					timesyncData[timesyncBoot.BootUUID] = timesyncBoot
 				}
 			}
-			timesyncBootData, err := parseTimesyncBoot(c)
+			timesyncBootData, err := parseTimesyncBoot(c, logger)
 			if err != nil {
 				return nil, err
 			}
@@ -80,7 +80,8 @@ func parseTimesyncData(data []byte) (map[string]*TimesyncBoot, error) {
 }
 
 // parseTimesyncBoot parses a timesync boot header record.
-func parseTimesyncBoot(c *cursor) (*TimesyncBoot, error) {
+func parseTimesyncBoot(
+	c *cursor, logger *Logger) (*TimesyncBoot, error) {
 	timesyncSignature, err := c.u16()
 	if err != nil {
 		return nil, err
@@ -88,7 +89,7 @@ func parseTimesyncBoot(c *cursor) (*TimesyncBoot, error) {
 
 	const expectedBootSignature uint16 = 0xbbb0
 	if expectedBootSignature != timesyncSignature {
-		logger.Printf("[macos-unifiedlogs] Incorrect Timesync boot header signature. Expected %d. Got: %d",
+		logger.Printf("Incorrect Timesync boot header signature. Expected %d. Got: %d",
 			expectedBootSignature, timesyncSignature)
 		return nil, fmt.Errorf("incorrect timesync boot header signature: %w", ErrIncomplete)
 	}
@@ -140,7 +141,8 @@ func parseTimesyncBoot(c *cursor) (*TimesyncBoot, error) {
 }
 
 // parseTimesync parses an individual timesync record.
-func parseTimesync(c *cursor) (Timesync, error) {
+func parseTimesync(
+	c *cursor, logger *Logger) (Timesync, error) {
 	timesync := Timesync{}
 
 	timesyncSignature, err := c.u32()
@@ -150,7 +152,7 @@ func parseTimesync(c *cursor) (Timesync, error) {
 
 	const expectedRecordSignature uint32 = 0x207354
 	if expectedRecordSignature != timesyncSignature {
-		logger.Printf("[macos-unifiedlogs] Incorrect Timesync record header signature. Expected %d. Got: %d",
+		logger.Printf("Incorrect Timesync record header signature. Expected %d. Got: %d",
 			expectedRecordSignature, timesyncSignature)
 		return Timesync{}, fmt.Errorf("incorrect timesync record header signature: %w", ErrIncomplete)
 	}
@@ -204,20 +206,19 @@ func parseTimesync(c *cursor) (Timesync, error) {
 // get the nanosecond representation.
 //
 // Add results to timesync_walltime (unix epoch in nanoseconds).
-// Final results is unix epoch timestamp in nanoseconds.
-func getTimestamp(timesyncData map[string]*TimesyncBoot, bootUUID string, firehoseLogDeltaTime, firehosePreambleTime uint64) float64 {
-	var timesyncContinousTime uint64
+// Final results is unix epoch timestamp in nanoseconds.  Note:
+// Original code used floats but this leads to loss of precision -
+// changed to use int64
+func getTimestamp(timesyncData map[string]*TimesyncBoot,
+	bootUUID string,
+	firehoseLogDeltaTime, firehosePreambleTime uint64) int64 {
+
+	var timesyncContinousTime int64
 	var timesyncWalltime int64
 
 	// Apple Intel uses 1/1 as the timebase
-	timebaseAdjustment := 1.0
-	if timesync, ok := timesyncData[bootUUID]; ok {
-		if timesync.TimebaseNumerator == 125 && timesync.TimebaseDenominator == 3 {
-			// For Apple Silicon (ARM) we need to adjust the mach time by
-			// multiplying by 125.0/3.0 to get the accurate nanosecond count
-			timebaseAdjustment = 125.0 / 3.0
-		}
-
+	timesync, ok := timesyncData[bootUUID]
+	if ok {
 		// A preamble time of 0 means we need to use the timesync header boot
 		// time as our minimum value. We also set the timesync_continous_time to zero.
 		if firehosePreambleTime == 0 {
@@ -227,19 +228,31 @@ func getTimestamp(timesyncData map[string]*TimesyncBoot, bootUUID string, fireho
 		for _, timesyncRecord := range timesync.Timesync {
 			if timesyncRecord.KernelTime > firehoseLogDeltaTime {
 				if timesyncContinousTime == 0 && timesyncWalltime == 0 {
-					timesyncContinousTime = timesyncRecord.KernelTime
+					timesyncContinousTime = int64(timesyncRecord.KernelTime)
 					timesyncWalltime = timesyncRecord.Walltime
 				}
 				break
 			}
 
-			timesyncContinousTime = timesyncRecord.KernelTime
+			timesyncContinousTime = int64(timesyncRecord.KernelTime)
 			timesyncWalltime = timesyncRecord.Walltime
 		}
 	}
 
-	// Equivalent to Rust's (firehose_log_delta_time as f64).mul_add(
-	// timebase_adjustment, -(timesync_continous_time as f64) * timebase_adjustment)
-	continousTime := math.FMA(float64(firehoseLogDeltaTime), timebaseAdjustment, -float64(timesyncContinousTime)*timebaseAdjustment)
-	return continousTime + float64(timesyncWalltime)
+	continousTime := int64(firehoseLogDeltaTime)
+
+	if timesync != nil &&
+		timesync.TimebaseNumerator == 125 &&
+		timesync.TimebaseDenominator == 3 {
+
+		// For Apple Silicon (ARM) we need to adjust the mach time by
+		// multiplying by 125.0/3.0 to get the accurate nanosecond count
+		continousTime *= 125
+		continousTime /= 3
+
+		timesyncContinousTime *= 125
+		timesyncContinousTime /= 3
+	}
+
+	return continousTime - timesyncContinousTime + timesyncWalltime
 }

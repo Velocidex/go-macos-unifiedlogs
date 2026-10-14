@@ -55,7 +55,8 @@ func TestPaddingSizeFour(t *testing.T) {
 
 func TestExtractStringSize(t *testing.T) {
 	testData := []byte{55, 57, 54, 46, 49, 48, 48, 0}
-	_, results, err := extractStringSize(testData, 8)
+	l := NewLogger()
+	_, results, err := extractStringSize(testData, 8, l)
 	if err != nil {
 		t.Fatalf("extractStringSize returned error: %v", err)
 	}
@@ -66,7 +67,8 @@ func TestExtractStringSize(t *testing.T) {
 
 func TestExtractString(t *testing.T) {
 	testData := []byte{55, 57, 54, 46, 49, 48, 48, 0}
-	_, results, err := extractString(testData)
+	l := NewLogger()
+	_, results, err := extractString(testData, l)
 	if err != nil {
 		t.Fatalf("extractString returned error: %v", err)
 	}

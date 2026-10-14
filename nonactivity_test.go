@@ -20,8 +20,8 @@ func TestParseNonActivity(t *testing.T) {
 		115, 112, 97, 116, 99, 104, 69, 118, 101, 110, 116, 0,
 	}
 	testFlags := uint16(556)
-
-	_, results, err := parseNonActivity(testData, testFlags)
+	logger := NewLogger()
+	_, results, err := parseNonActivity(testData, testFlags, logger)
 	if err != nil {
 		t.Fatalf("parseNonActivity returned error: %v", err)
 	}
@@ -82,8 +82,8 @@ func TestPersonaFlag(t *testing.T) {
 		49, 52, 48, 57, 52, 49, 48, 0,
 	}
 	testFlags := uint16(580)
-
-	_, results, err := parseNonActivity(testData, testFlags)
+	logger := NewLogger()
+	_, results, err := parseNonActivity(testData, testFlags, logger)
 	if err != nil {
 		t.Fatalf("parseNonActivity returned error: %v", err)
 	}

@@ -38,6 +38,10 @@ func (f *fakeProvider) ReadDSCUUID(uuid string) (*SharedCacheStrings, error) {
 	return &SharedCacheStrings{DSCUUID: uuid, Signature: 2}, nil
 }
 
+func (f *fakeProvider) Logger() *Logger {
+	return NewLogger()
+}
+
 func TestMemoryStringCacheUUIDText(t *testing.T) {
 	cache := NewMemoryStringCache()
 	provider := &fakeProvider{}

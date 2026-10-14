@@ -14,7 +14,8 @@ import (
 
 func TestParseFirehoseTrace(t *testing.T) {
 	testData := []byte{106, 139, 3, 0, 0}
-	_, results, err := parseFirehoseTrace(testData)
+	l := NewLogger()
+	_, results, err := parseFirehoseTrace(testData, l)
 	if err != nil {
 		t.Fatalf("parseFirehoseTrace returned error: %v", err)
 	}
@@ -23,7 +24,7 @@ func TestParseFirehoseTrace(t *testing.T) {
 	}
 
 	testData = []byte{248, 145, 3, 0, 200, 0, 0, 0, 0, 0, 0, 0, 8, 1}
-	_, results, err = parseFirehoseTrace(testData)
+	_, results, err = parseFirehoseTrace(testData, l)
 	if err != nil {
 		t.Fatalf("parseFirehoseTrace returned error: %v", err)
 	}
@@ -38,7 +39,8 @@ func TestParseFirehoseTrace(t *testing.T) {
 func TestParseTraceMessage(t *testing.T) {
 	testMessage := []byte{200, 0, 0, 0, 0, 0, 0, 0, 8, 1}
 	slices.Reverse(testMessage)
-	_, results, err := parseTraceMessage(testMessage)
+	l := NewLogger()
+	_, results, err := parseTraceMessage(testMessage, l)
 	if err != nil {
 		t.Fatalf("parseTraceMessage returned error: %v", err)
 	}
@@ -52,7 +54,8 @@ func TestParseTraceMessage(t *testing.T) {
 
 func TestParseTraceMessageMultiple(t *testing.T) {
 	testMessage := []byte{2, 8, 8, 0, 0, 0, 0, 0, 0, 0, 200, 0, 0, 127, 251, 75, 225, 96, 176}
-	_, results, err := parseTraceMessage(testMessage)
+	l := NewLogger()
+	_, results, err := parseTraceMessage(testMessage, l)
 	if err != nil {
 		t.Fatalf("parseTraceMessage returned error: %v", err)
 	}
@@ -70,7 +73,8 @@ func TestParseTraceMessageMultiple(t *testing.T) {
 func TestGetMessage(t *testing.T) {
 	testMessage := []byte{200, 0, 0, 0, 0, 0, 0, 0, 8, 1}
 	slices.Reverse(testMessage)
-	results := getTraceMessage(testMessage)
+	l := NewLogger()
+	results := getTraceMessage(testMessage, l)
 	if len(results.ItemInfo) == 0 {
 		t.Fatal("item_info is empty")
 	}

@@ -9,6 +9,7 @@ package unifiedlogs
 
 import (
 	"fmt"
+	"math"
 )
 
 // SharedCacheStrings contains the parsed shared string cache (dsc) data.
@@ -29,7 +30,9 @@ type RangeDescriptor struct {
 	RangeOffset uint64 `json:"range_offset"`
 	DataOffset  uint32 `json:"data_offset"`
 	RangeSize   uint32 `json:"range_size"`
-	// Added in version 2. In version 1 the index is 4 bytes and is at the start of the range descriptor
+
+	// Added in version 2. In version 1 the index is 4 bytes and is at
+	// the start of the range descriptor
 	UUIDIndex uint64 `json:"uuid_index"`
 	Strings   []byte `json:"strings"`
 }
@@ -43,9 +46,8 @@ type UUIDDescriptor struct {
 	PathString string `json:"path_string"` // Not part of format
 }
 
-// parseDSC parses shared strings data (the file(s) in /private/var/db/uuidtext/dsc).
-func parseDSC(data []byte) (*SharedCacheStrings, error) {
-	c := newCursor(data)
+func ParseDSC(
+	c *ReadCursor, logger *Logger) (*SharedCacheStrings, error) {
 	signature, err := c.u32()
 	if err != nil {
 		return nil, err
@@ -53,7 +55,7 @@ func parseDSC(data []byte) (*SharedCacheStrings, error) {
 
 	const expectedDSCSignature uint32 = 0x64736368
 	if expectedDSCSignature != signature {
-		logger.Printf("[macos-unifiedlogs] Incorrect DSC file signature. Expected %d. Got: %d",
+		logger.Printf(" Incorrect DSC file signature. Expected %d. Got: %d",
 			expectedDSCSignature, signature)
 		return nil, fmt.Errorf("incorrect DSC file signature: %w", ErrIncomplete)
 	}
@@ -105,7 +107,10 @@ func parseDSC(data []byte) (*SharedCacheStrings, error) {
 	}
 
 	for i := range sharedCacheStrings.UUIDs {
-		pathString, err := getPaths(data, sharedCacheStrings.UUIDs[i].PathOffset)
+		pathString, err := c.string(
+			uint64(sharedCacheStrings.UUIDs[i].PathOffset),
+			math.MaxInt64)
+
 		if err != nil {
 			return nil, err
 		}
@@ -113,10 +118,13 @@ func parseDSC(data []byte) (*SharedCacheStrings, error) {
 	}
 
 	for i := range sharedCacheStrings.Ranges {
-		strings, err := getStrings(data, sharedCacheStrings.Ranges[i].DataOffset, sharedCacheStrings.Ranges[i].RangeSize)
+		strings, err := c.bytes(
+			int64(sharedCacheStrings.Ranges[i].DataOffset),
+			int64(sharedCacheStrings.Ranges[i].RangeSize))
 		if err != nil {
 			return nil, err
 		}
+
 		sharedCacheStrings.Ranges[i].Strings = strings
 	}
 
@@ -127,7 +135,7 @@ func parseDSC(data []byte) (*SharedCacheStrings, error) {
 // string entry is located. Version 2 (Monterey and higher) changed the Range
 // format a bit: range offset is now 8 bytes (vs 4 bytes) and starts at
 // beginning; the uuid index was moved to end.
-func getRanges(c *cursor, version uint16) (RangeDescriptor, error) {
+func getRanges(c *ReadCursor, version uint16) (RangeDescriptor, error) {
 	const versionNumber uint16 = 2
 	var rangeData RangeDescriptor
 
@@ -175,7 +183,7 @@ func getRanges(c *cursor, version uint16) (RangeDescriptor, error) {
 }
 
 // getUUIDs gets UUID entries related to ranges.
-func getUUIDs(c *cursor, version uint16) (UUIDDescriptor, error) {
+func getUUIDs(c *ReadCursor, version uint16) (UUIDDescriptor, error) {
 	var uuidData UUIDDescriptor
 
 	const versionNumber uint16 = 2
@@ -211,31 +219,4 @@ func getUUIDs(c *cursor, version uint16) (UUIDDescriptor, error) {
 	uuidData.PathOffset = dscPathOffset
 
 	return uuidData, nil
-}
-
-// getPaths extracts the path string at the provided path offset.
-func getPaths(data []byte, pathOffset uint32) (string, error) {
-	if uint64(pathOffset) > uint64(len(data)) {
-		return "", fmt.Errorf("path offset %d beyond data length %d: %w", pathOffset, len(data), ErrEof)
-	}
-	nomPathOffset := data[pathOffset:]
-	_, path, err := extractString(nomPathOffset)
-	if err != nil {
-		return "", err
-	}
-	return path, nil
-}
-
-// getStrings extracts the base log entry strings (remaining data after parsing
-// the ranges and UUIDs).
-func getStrings(data []byte, stringOffset, stringRange uint32) ([]byte, error) {
-	if uint64(stringOffset) > uint64(len(data)) {
-		return nil, fmt.Errorf("string offset %d beyond data length %d: %w", stringOffset, len(data), ErrEof)
-	}
-	nomStringOffset := data[stringOffset:]
-	if uint64(stringRange) > uint64(len(nomStringOffset)) {
-		return nil, fmt.Errorf("string range %d beyond data length %d: %w", stringRange, len(nomStringOffset), ErrEof)
-	}
-	strings := nomStringOffset[:stringRange]
-	return append([]byte{}, strings...), nil
 }

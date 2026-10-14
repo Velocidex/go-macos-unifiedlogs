@@ -26,13 +26,16 @@ type FirehoseSignpost struct {
 
 // parseSignpost parses a Signpost Firehose log entry.
 // Ex: tp 2368 + 92: process signpost event (shared_cache, has_name, has_subsystem)
-func parseSignpost(data []byte, firehoseFlags uint16) ([]byte, FirehoseSignpost, error) {
+func parseSignpost(
+	data []byte,
+	firehoseFlags uint16,
+	logger *Logger) ([]byte, FirehoseSignpost, error) {
 	var firehoseSignpost FirehoseSignpost
 	c := newCursor(data)
 
 	const activityIDCurrent uint16 = 0x1 // has_current_aid flag
 	if (firehoseFlags & activityIDCurrent) != 0 {
-		// debug!("[macos-unifiedlogs] Signpost Firehose has has_current_aid flag")
+		// debug!(" Signpost Firehose has has_current_aid flag")
 		firehoseActivityID, err := c.u32()
 		if err != nil {
 			return nil, firehoseSignpost, err
@@ -48,7 +51,7 @@ func parseSignpost(data []byte, firehoseFlags uint16) ([]byte, FirehoseSignpost,
 
 	const hasPersona uint16 = 0x40
 	if (firehoseFlags & hasPersona) != 0 {
-		// debug!("[macos-unifiedlogs] Signpost Firehose has has_persona flag")
+		// debug!(" Signpost Firehose has has_persona flag")
 		personaID, err := c.u32()
 		if err != nil {
 			return nil, firehoseSignpost, err
@@ -60,7 +63,7 @@ func parseSignpost(data []byte, firehoseFlags uint16) ([]byte, FirehoseSignpost,
 	const privateStringRange uint16 = 0x100 // has_private_data flag
 	// Entry has private string data. The private data is found after parsing all the public data first
 	if (firehoseFlags & privateStringRange) != 0 {
-		// debug!("[macos-unifiedlogs] Signpost Firehose has has_private_data flag")
+		// debug!(" Signpost Firehose has has_private_data flag")
 		firehosePrivateStringsOffset, err := c.u16()
 		if err != nil {
 			return nil, firehoseSignpost, err
@@ -82,7 +85,9 @@ func parseSignpost(data []byte, firehoseFlags uint16) ([]byte, FirehoseSignpost,
 	firehoseSignpost.PCID = firehosePCID
 
 	// Check for flags related to base string format location (shared string file (dsc) or UUID file)
-	remaining, formatters, err := FirehoseFormatterFlags(c.rest(), firehoseFlags, &firehoseSignpost.Flags)
+	remaining, formatters, err := FirehoseFormatterFlags(
+		c.rest(), firehoseFlags,
+		&firehoseSignpost.Flags, logger)
 	if err != nil {
 		return nil, firehoseSignpost, err
 	}
@@ -91,7 +96,7 @@ func parseSignpost(data []byte, firehoseFlags uint16) ([]byte, FirehoseSignpost,
 
 	const subsystem uint16 = 0x200 // has_subsystem flag. In Signpost log entries this is the subsystem flag
 	if (firehoseFlags & subsystem) != 0 {
-		// debug!("[macos-unifiedlogs] Signpost Firehose log chunk has has_subsystem flag")
+		// debug!(" Signpost Firehose log chunk has has_subsystem flag")
 		firehoseSubsystem, err := c.u16()
 		if err != nil {
 			return nil, firehoseSignpost, err
@@ -108,7 +113,7 @@ func parseSignpost(data []byte, firehoseFlags uint16) ([]byte, FirehoseSignpost,
 
 	const hasRules uint16 = 0x400 // has_rules flag
 	if (firehoseFlags & hasRules) != 0 {
-		// debug!("[macos-unifiedlogs] Signpost Firehose log chunk has has_rules flag")
+		// debug!(" Signpost Firehose log chunk has has_rules flag")
 		firehoseTTL, err := c.u8()
 		if err != nil {
 			return nil, firehoseSignpost, err
@@ -119,7 +124,7 @@ func parseSignpost(data []byte, firehoseFlags uint16) ([]byte, FirehoseSignpost,
 
 	const dataRef uint16 = 0x800 // has_oversize flag
 	if (firehoseFlags & dataRef) != 0 {
-		// debug!("[macos-unifiedlogs] Signpost Firehose log chunk has has_oversize flag")
+		// debug!(" Signpost Firehose log chunk has has_oversize flag")
 		firehoseDataRef, err := c.u32()
 		if err != nil {
 			return nil, firehoseSignpost, err
@@ -130,7 +135,7 @@ func parseSignpost(data []byte, firehoseFlags uint16) ([]byte, FirehoseSignpost,
 
 	const hasName uint16 = 0x8000
 	if (firehoseFlags & hasName) != 0 {
-		// debug!("[macos-unifiedlogs] Signpost Firehose log chunk has has_name flag")
+		// debug!(" Signpost Firehose log chunk has has_name flag")
 		firehoseSignpostName, err := c.u32()
 		if err != nil {
 			return nil, firehoseSignpost, err

@@ -28,7 +28,8 @@ type FirehoseActivity struct {
 
 // parseActivity parses an Activity Type Firehose log entry.
 // Ex: tp 3536 + 60: activity create (has_current_aid, has_unique_pid, shared_cache, has_other_aid)
-func parseActivity(data []byte, firehoseFlags uint16, firehoseLogType uint8) ([]byte, FirehoseActivity, error) {
+func parseActivity(data []byte, firehoseFlags uint16,
+	firehoseLogType uint8, logger *Logger) ([]byte, FirehoseActivity, error) {
 	var activity FirehoseActivity
 	c := newCursor(data)
 
@@ -50,7 +51,7 @@ func parseActivity(data []byte, firehoseFlags uint16, firehoseLogType uint8) ([]
 
 	const uniquePID uint16 = 0x10 // has_unique_pid flag
 	if (firehoseFlags & uniquePID) != 0 {
-		logger.Printf("[macos-unifiedlogs] Activity Firehose log chunk has unique_pid flag")
+		logger.Debugf(" Activity Firehose log chunk has unique_pid flag")
 		firehoseUniquePID, err := c.u64()
 		if err != nil {
 			return nil, activity, err
@@ -61,7 +62,7 @@ func parseActivity(data []byte, firehoseFlags uint16, firehoseLogType uint8) ([]
 
 	const activityIDCurrent uint16 = 0x1 // has_current_aid flag
 	if (firehoseFlags & activityIDCurrent) != 0 {
-		logger.Printf("[macos-unifiedlogs] Activity Firehose log chunk has has_current_aid flag")
+		logger.Debugf(" Activity Firehose log chunk has has_current_aid flag")
 		firehoseActivityID, err := c.u32()
 		if err != nil {
 			return nil, activity, err
@@ -77,7 +78,7 @@ func parseActivity(data []byte, firehoseFlags uint16, firehoseLogType uint8) ([]
 
 	const hasPersona uint16 = 0x40
 	if (firehoseFlags & hasPersona) != 0 {
-		logger.Printf("[macos-unifiedlogs] Activity Firehose log chunk has has_persona flag")
+		logger.Debugf(" Activity Firehose log chunk has has_persona flag")
 		personaID, err := c.u32()
 		if err != nil {
 			return nil, activity, err
@@ -89,7 +90,7 @@ func parseActivity(data []byte, firehoseFlags uint16, firehoseLogType uint8) ([]
 	// has_other_current_aid flag. In Activity log entries this is another activity id flag
 	const activityIDOther uint16 = 0x200
 	if (firehoseFlags & activityIDOther) != 0 {
-		logger.Printf("[macos-unifiedlogs] Activity Firehose log chunk has has_other_current_aid flag")
+		logger.Debugf(" Activity Firehose log chunk has has_other_current_aid flag")
 		firehoseActivityID, err := c.u32()
 		if err != nil {
 			return nil, activity, err
@@ -111,7 +112,8 @@ func parseActivity(data []byte, firehoseFlags uint16, firehoseLogType uint8) ([]
 
 	// Check for flags related to base string format location (shared string file (dsc) or UUID file)
 	firehoseInput := c.rest()
-	firehoseInput, formatters, err := FirehoseFormatterFlags(firehoseInput, firehoseFlags, &activity.Flags)
+	firehoseInput, formatters, err := FirehoseFormatterFlags(
+		firehoseInput, firehoseFlags, &activity.Flags, logger)
 	if err != nil {
 		return nil, activity, err
 	}
